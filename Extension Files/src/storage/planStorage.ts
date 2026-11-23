@@ -15,6 +15,22 @@ export interface StorageAreaLike {
   remove(keys: string | string[]): Promise<void>;
 }
 
+export interface StorageChangeEntry {
+  oldValue?: unknown;
+  newValue?: unknown;
+}
+
+export interface StorageOnChangedLike {
+  addListener(
+    listener: (changes: Record<string, StorageChangeEntry>, areaName: string) => void
+  ): void;
+  removeListener(
+    listener: (changes: Record<string, StorageChangeEntry>, areaName: string) => void
+  ): void;
+}
+
+const writeQueueByStorage = new WeakMap<StorageAreaLike, Promise<void>>();
+
 function resolveStorageArea(storage?: StorageAreaLike): StorageAreaLike {
   if (storage) {
     return storage;
@@ -27,9 +43,17 @@ function resolveStorageArea(storage?: StorageAreaLike): StorageAreaLike {
   return chromeStorage;
 }
 
+function enqueueStorageWrite(area: StorageAreaLike, task: () => Promise<void>): Promise<void> {
+  const previous = writeQueueByStorage.get(area) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  const tracked = next.catch(() => undefined);
+  writeQueueByStorage.set(area, tracked);
+  return next;
+}
+
 /**
  * Loads the persisted `AcademicPlanState` from `chrome.storage.local`.
- * Falls back safely to a fresh default state if missing, corrupted, or schema-mismatched.
+ * Self-heals corrupted or schema-mismatched entries by removing them and falling back to defaults.
  */
 export async function loadAcademicPlan(storage?: StorageAreaLike): Promise<AcademicPlanState> {
   const area = resolveStorageArea(storage);
@@ -43,16 +67,19 @@ export async function loadAcademicPlan(storage?: StorageAreaLike): Promise<Acade
   try {
     const validated = validateAcademicPlanState(raw);
     if (validated.schemaVersion !== PLAN_SCHEMA_VERSION) {
+      await area.remove(PLAN_STORAGE_KEY).catch(() => undefined);
       return createDefaultAcademicPlanState();
     }
     return validated;
   } catch {
+    await area.remove(PLAN_STORAGE_KEY).catch(() => undefined);
     return createDefaultAcademicPlanState();
   }
 }
 
 /**
- * Persists the given `AcademicPlanState` under the versioned `chrome.storage.local` key.
+ * Persists the given `AcademicPlanState` under the versioned `chrome.storage.local` key
+ * using a per-storage serialized write queue so rapid edits never overwrite newer state.
  */
 export async function saveAcademicPlan(
   plan: AcademicPlanState,
@@ -63,7 +90,7 @@ export async function saveAcademicPlan(
     ...plan,
     schemaVersion: PLAN_SCHEMA_VERSION,
   };
-  await area.set({ [PLAN_STORAGE_KEY]: envelope });
+  await enqueueStorageWrite(area, () => area.set({ [PLAN_STORAGE_KEY]: envelope }));
 }
 
 /**
@@ -71,7 +98,52 @@ export async function saveAcademicPlan(
  */
 export async function clearAcademicPlan(storage?: StorageAreaLike): Promise<void> {
   const area = resolveStorageArea(storage);
-  await area.remove(PLAN_STORAGE_KEY);
+  await enqueueStorageWrite(area, () => area.remove(PLAN_STORAGE_KEY));
+}
+
+/**
+ * Subscribes to external `chrome.storage.local` updates to keep popup, side-panel,
+ * and overlay views synchronized without accepting corrupted payloads.
+ */
+export function subscribeAcademicPlanChanges(
+  onPlanChange: (plan: AcademicPlanState) => void,
+  storageOnChanged?: StorageOnChangedLike
+): () => void {
+  const events =
+    storageOnChanged ??
+    (globalThis as { chrome?: { storage?: { onChanged?: StorageOnChangedLike } } }).chrome?.storage
+      ?.onChanged;
+
+  if (!events?.addListener || !events?.removeListener) {
+    return () => undefined;
+  }
+
+  const listener = (changes: Record<string, StorageChangeEntry>, areaName: string) => {
+    if (areaName !== 'local') {
+      return;
+    }
+    const change = changes[PLAN_STORAGE_KEY];
+    if (!change) {
+      return;
+    }
+    if (change.newValue === undefined || change.newValue === null) {
+      onPlanChange(createDefaultAcademicPlanState());
+      return;
+    }
+    try {
+      const validated = validateAcademicPlanState(change.newValue);
+      if (validated.schemaVersion === PLAN_SCHEMA_VERSION) {
+        onPlanChange(validated);
+      }
+    } catch {
+      // Ignore malformed storage writes from external sources.
+    }
+  };
+
+  events.addListener(listener);
+  return () => {
+    events.removeListener(listener);
+  };
 }
 
 /**

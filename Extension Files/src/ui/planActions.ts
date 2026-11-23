@@ -201,6 +201,63 @@ export function mergeSyncedPreEnlistedCourses(
   };
 }
 
+export interface SyncedCourseRefreshOutcome {
+  instanceId: string;
+  courseCode: string;
+  refreshedCourse?: CourseEntry | null;
+  notFoundOnNewTerm?: boolean;
+}
+
+/**
+ * Reconciles a live AMIS sync into the current AcademicPlanState:
+ * - Updates termId, pre-enlisted courses, and lastRefreshTime.
+ * - Updates refreshed intended courses in place (preserving section flags and accordion state).
+ * - If the active AMIS term changed, evicts stale courses that do not exist in the new term.
+ */
+export function reconcileSyncedPlan(
+  prevPlan: AcademicPlanState,
+  options: {
+    termId: number;
+    preEnlistedCourses: CourseEntry[];
+    refreshedAt: string;
+    intendedOutcomes: readonly SyncedCourseRefreshOutcome[];
+  }
+): { plan: AcademicPlanState; removedCourseCodes: string[] } {
+  const termChanged = prevPlan.termId !== null && prevPlan.termId !== options.termId;
+  let updatedPlan = mergeSyncedPreEnlistedCourses(
+    prevPlan,
+    options.preEnlistedCourses,
+    options.termId,
+    options.refreshedAt
+  );
+
+  const evictedInstanceIds = new Set<string>();
+  const removedCourseCodes: string[] = [];
+
+  for (const outcome of options.intendedOutcomes) {
+    if (outcome.refreshedCourse) {
+      updatedPlan = addOrUpdateIntendedCourse(updatedPlan, outcome.refreshedCourse);
+    } else if (termChanged && outcome.notFoundOnNewTerm) {
+      evictedInstanceIds.add(outcome.instanceId);
+      removedCourseCodes.push(outcome.courseCode);
+    }
+  }
+
+  if (evictedInstanceIds.size > 0) {
+    updatedPlan = {
+      ...updatedPlan,
+      intendedCourses: updatedPlan.intendedCourses.filter(
+        (course) => !evictedInstanceIds.has(course.instanceId)
+      ),
+    };
+  }
+
+  return {
+    plan: updatedPlan,
+    removedCourseCodes,
+  };
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }

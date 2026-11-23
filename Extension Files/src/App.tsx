@@ -25,6 +25,7 @@ import {
   loadAcademicPlan,
   saveAcademicPlan,
   shouldAutoRefresh,
+  subscribeAcademicPlanChanges,
 } from './storage/planStorage.ts';
 import type { RawAmisCourse } from './types/amis.ts';
 import {
@@ -41,15 +42,16 @@ import type {
 import {
   addOrUpdateIntendedCourse,
   applyRelaxationActionToPlan,
-  mergeSyncedPreEnlistedCourses,
+  reconcileSyncedPlan,
   removeIntendedCourse,
   toggleBlockedCell,
   toggleCourseAccordion,
   toggleSectionFlag,
   updatePreferences,
+  type SyncedCourseRefreshOutcome,
 } from './ui/planActions.ts';
 import { computePlanUnits } from './ui/scheduleView.ts';
-import { SolverWorkerClient } from './ui/workerClient.ts';
+import { isSolverCancelledError, SolverWorkerClient } from './ui/workerClient.ts';
 
 type RightTab = 'courses' | 'preferences';
 
@@ -83,6 +85,9 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAddingCourse, setIsAddingCourse] = useState(false);
   const [isSolving, setIsSolving] = useState(false);
+  const [isOffline, setIsOffline] = useState(
+    () => typeof navigator !== 'undefined' && navigator.onLine === false
+  );
 
   const [alternatives, setAlternatives] = useState<GeneratedScheduleAlternative[]>([]);
   const [selectedPlanIndex, setSelectedPlanIndex] = useState(0);
@@ -93,10 +98,28 @@ export default function App() {
   const planRef = useRef<AcademicPlanState>(plan);
   planRef.current = plan;
   const autoSyncedTokenRef = useRef<string | null>(null);
+  const solveRunIdRef = useRef(0);
+  const activeSolveRef = useRef(false);
+  const lastPersistedJsonRef = useRef<string | null>(null);
 
   const isInIframe = typeof window !== 'undefined' && window.parent !== window;
 
-  // 1. Hydrate AcademicPlanState from chrome.storage.local on mount.
+  // Track browser online/offline transitions gracefully.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // 1. Hydrate AcademicPlanState from chrome.storage.local on mount & sync external updates.
   useEffect(() => {
     let cancelled = false;
     if (!hasChromeStorageApi()) {
@@ -107,6 +130,8 @@ export default function App() {
     void loadAcademicPlan()
       .then((loaded) => {
         if (!cancelled) {
+          lastPersistedJsonRef.current = JSON.stringify(loaded);
+          planRef.current = loaded;
           setPlan(loaded);
           setStorageHydrated(true);
         }
@@ -117,8 +142,24 @@ export default function App() {
         }
       });
 
+    const unsubscribeStorage = subscribeAcademicPlanChanges((externalPlan) => {
+      if (cancelled) return;
+      const serialized = JSON.stringify(externalPlan);
+      if (serialized === lastPersistedJsonRef.current) {
+        return;
+      }
+      lastPersistedJsonRef.current = serialized;
+      planRef.current = externalPlan;
+      setPlan(externalPlan);
+      setAlternatives([]);
+      setSelectedPlanIndex(0);
+      setDiagnosis(null);
+      setIsSolveBlocked(false);
+    });
+
     return () => {
       cancelled = true;
+      unsubscribeStorage();
     };
   }, []);
 
@@ -126,11 +167,22 @@ export default function App() {
   const commitPlan = useCallback(
     (
       updater: (prev: AcademicPlanState) => AcademicPlanState,
-      options?: { resetInfeasibleBlock?: boolean }
+      options?: { resetInfeasibleBlock?: boolean; preserveSchedule?: boolean }
     ): AcademicPlanState => {
       const next = updater(planRef.current);
       planRef.current = next;
       setPlan(next);
+
+      if (options?.preserveSchedule !== true) {
+        setAlternatives([]);
+        setSelectedPlanIndex(0);
+        if (activeSolveRef.current) {
+          solveRunIdRef.current += 1;
+          activeSolveRef.current = false;
+          workerClientRef.current?.cancelAndRespawn();
+          setIsSolving(false);
+        }
+      }
 
       if (options?.resetInfeasibleBlock !== false) {
         setIsSolveBlocked(false);
@@ -138,6 +190,7 @@ export default function App() {
       }
 
       if (hasChromeStorageApi()) {
+        lastPersistedJsonRef.current = JSON.stringify(next);
         void saveAcademicPlan(next).catch(() => {
           // Non-fatal storage error; keep UI state responsive.
         });
@@ -209,6 +262,13 @@ export default function App() {
       setSearchError(null);
       setStatusMessage(null);
 
+      if (isOffline) {
+        setStatusMessage(
+          'Browser is offline. Live AMIS sync is unavailable, but local schedule optimization still works on cached courses.'
+        );
+        return;
+      }
+
       let activeToken = options?.tokenOverride ?? authToken;
       if (!activeToken && hasChromeTabsApi()) {
         try {
@@ -254,39 +314,74 @@ export default function App() {
           userId
         );
 
-        let updatedPlan = mergeSyncedPreEnlistedCourses(
-          planRef.current,
-          preEnlistedCourses,
+        let hadTransientRefreshError = false;
+        const intendedOutcomes: SyncedCourseRefreshOutcome[] =
+          planRef.current.intendedCourses.length > 0
+            ? await Promise.all(
+                planRef.current.intendedCourses.map(async (existing) => {
+                  try {
+                    const refreshedCourse = await fetchCourseWithClasses(
+                      activeToken as string,
+                      termId,
+                      existing.code
+                    );
+                    return {
+                      instanceId: existing.instanceId,
+                      courseCode: existing.code,
+                      refreshedCourse,
+                    };
+                  } catch (courseErr) {
+                    if (
+                      isAmisError(courseErr) &&
+                      (courseErr.code === 'SESSION_EXPIRED' ||
+                        courseErr.code === 'UNAUTHENTICATED')
+                    ) {
+                      throw courseErr;
+                    }
+                    if (
+                      isAmisError(courseErr) &&
+                      (courseErr.code === 'COURSE_NOT_FOUND' ||
+                        courseErr.code === 'NO_CLASSES_FOUND')
+                    ) {
+                      return {
+                        instanceId: existing.instanceId,
+                        courseCode: existing.code,
+                        notFoundOnNewTerm: true,
+                      };
+                    }
+                    hadTransientRefreshError = true;
+                    return {
+                      instanceId: existing.instanceId,
+                      courseCode: existing.code,
+                    };
+                  }
+                })
+              )
+            : [];
+
+        const { plan: updatedPlan, removedCourseCodes } = reconcileSyncedPlan(planRef.current, {
           termId,
-          new Date().toISOString()
-        );
-
-        // Refresh existing intended courses' section capacities while preserving user flags.
-        if (updatedPlan.intendedCourses.length > 0) {
-          const refreshedCourses = await Promise.all(
-            updatedPlan.intendedCourses.map(async (existing) => {
-              try {
-                return await fetchCourseWithClasses(activeToken as string, termId, existing.code);
-              } catch {
-                return null;
-              }
-            })
-          );
-
-          for (const refreshed of refreshedCourses) {
-            if (refreshed) {
-              updatedPlan = addOrUpdateIntendedCourse(updatedPlan, refreshed);
-            }
-          }
-        }
+          preEnlistedCourses,
+          refreshedAt: new Date().toISOString(),
+          intendedOutcomes,
+        });
 
         commitPlan(() => updatedPlan);
         setAuthStatus('connected');
-        setStatusMessage(
-          `Synced term ${termId} (${preEnlistedCourses.length} pre-enlisted course${
-            preEnlistedCourses.length === 1 ? '' : 's'
-          }).`
-        );
+
+        const baseMsg = `Synced term ${termId} (${preEnlistedCourses.length} pre-enlisted course${
+          preEnlistedCourses.length === 1 ? '' : 's'
+        }).`;
+        const extraNotes: string[] = [];
+        if (removedCourseCodes.length > 0) {
+          extraNotes.push(
+            `Removed unavailable previous-term course(s): ${removedCourseCodes.join(', ')}.`
+          );
+        }
+        if (hadTransientRefreshError) {
+          extraNotes.push('Kept cached sections for courses that failed to refresh.');
+        }
+        setStatusMessage(extraNotes.length > 0 ? `${baseMsg} ${extraNotes.join(' ')}` : baseMsg);
       } catch (err) {
         if (isAmisError(err) && err.code === 'SESSION_EXPIRED') {
           setAuthStatus('expired');
@@ -303,12 +398,12 @@ export default function App() {
         setIsSyncing(false);
       }
     },
-    [authToken, authStatus, commitPlan, isSyncing]
+    [authToken, authStatus, commitPlan, isOffline, isSyncing]
   );
 
   // Auto-sync once when storage is hydrated and a live AMIS auth token becomes available.
   useEffect(() => {
-    if (!storageHydrated || !authToken || authStatus !== 'connected') {
+    if (!storageHydrated || !authToken || authStatus !== 'connected' || isOffline) {
       return;
     }
     if (autoSyncedTokenRef.current === authToken) {
@@ -322,18 +417,23 @@ export default function App() {
     if (needsSync) {
       void syncFromAmis({ force: true, tokenOverride: authToken });
     }
-  }, [storageHydrated, authToken, authStatus, syncFromAmis]);
+  }, [storageHydrated, authToken, authStatus, isOffline, syncFromAmis]);
 
   // 5. Solver Execution (Phase 1 CP-SAT + automatic Phase 2 QuickXplain on INFEASIBLE).
   const runSolve = useCallback(async (targetPlan: AcademicPlanState) => {
     const client = workerClientRef.current;
     if (!client) return;
 
+    const runId = ++solveRunIdRef.current;
+    activeSolveRef.current = true;
     setIsSolving(true);
     setSearchError(null);
 
     try {
       const response = await client.solve(targetPlan);
+      if (runId !== solveRunIdRef.current) {
+        return;
+      }
       if (response.status === 'OPTIMAL' || response.status === 'FEASIBLE') {
         setAlternatives(response.alternatives);
         setSelectedPlanIndex(0);
@@ -346,12 +446,16 @@ export default function App() {
         setIsSolveBlocked(true);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!message.toLowerCase().includes('cancelled')) {
-        setSearchError(message);
+      if (runId !== solveRunIdRef.current || isSolverCancelledError(err)) {
+        return;
       }
+      const message = err instanceof Error ? err.message : String(err);
+      setSearchError(message);
     } finally {
-      setIsSolving(false);
+      if (runId === solveRunIdRef.current) {
+        activeSolveRef.current = false;
+        setIsSolving(false);
+      }
     }
   }, []);
 
@@ -360,6 +464,8 @@ export default function App() {
   }, [runSolve]);
 
   const handleCancelSolve = useCallback(() => {
+    solveRunIdRef.current += 1;
+    activeSolveRef.current = false;
     workerClientRef.current?.cancelAndRespawn();
     setIsSolving(false);
   }, []);
@@ -367,7 +473,7 @@ export default function App() {
   // 6. Course Search & Section Fetch (Milestone 2).
   const handleSearchSuggestions = useCallback(
     async (query: string): Promise<RawAmisCourse[]> => {
-      if (!authToken) {
+      if (isOffline || !authToken) {
         return [];
       }
       try {
@@ -380,13 +486,18 @@ export default function App() {
         return [];
       }
     },
-    [authToken]
+    [authToken, isOffline]
   );
 
   const handleAddCourseByCode = useCallback(
     async (courseCode: string): Promise<boolean> => {
       setSearchError(null);
       setStatusMessage(null);
+
+      if (isOffline) {
+        setSearchError('Browser is offline. Course search requires an active internet connection.');
+        return false;
+      }
 
       if (!authToken) {
         setSearchError(
@@ -422,7 +533,7 @@ export default function App() {
         setIsAddingCourse(false);
       }
     },
-    [authToken, commitPlan]
+    [authToken, commitPlan, isOffline]
   );
 
   // 7. Interactive Timetable, Course Flags, Preferences, and HITL Relaxations.
@@ -437,6 +548,7 @@ export default function App() {
     (instanceId: string) => {
       commitPlan((prev) => toggleCourseAccordion(prev, instanceId), {
         resetInfeasibleBlock: false,
+        preserveSchedule: true,
       });
     },
     [commitPlan]
@@ -466,12 +578,14 @@ export default function App() {
   const handleApplyConstraints = useCallback(() => {
     const current = planRef.current;
     if (hasChromeStorageApi()) {
+      lastPersistedJsonRef.current = JSON.stringify(current);
       void saveAcademicPlan(current).catch(() => {});
     }
     if (current.preEnlistedCourses.length > 0 || current.intendedCourses.length > 0) {
       void runSolve(current);
     } else {
       setActiveTab('courses');
+      setStatusMessage('Preferences saved. Add at least one course to generate schedules.');
     }
   }, [runSolve]);
 
@@ -483,6 +597,8 @@ export default function App() {
       }
       if (nextPlan.preEnlistedCourses.length > 0 || nextPlan.intendedCourses.length > 0) {
         void runSolve(nextPlan);
+      } else if (action.actionType === 'DROP_OR_REPLACE_COURSE') {
+        setStatusMessage('Dropped conflicting course. Search above to add an alternative course.');
       }
     },
     [commitPlan, runSolve]
@@ -599,6 +715,7 @@ export default function App() {
                 intendedCourses={plan.intendedCourses}
                 preEnlistedCourses={plan.preEnlistedCourses}
                 authStatus={authStatus}
+                isOffline={isOffline}
                 statusMessage={statusMessage}
                 searchError={searchError}
                 isSyncing={isSyncing}

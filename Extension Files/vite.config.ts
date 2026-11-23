@@ -1,9 +1,10 @@
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { protobufCspAotPlugin } from './build/protobufCspAotPlugin';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), protobufCspAotPlugin()],
   base: './',
   assetsInclude: ['**/*.wasm'],
   optimizeDeps: {
@@ -11,6 +12,7 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    plugins: () => [protobufCspAotPlugin()],
   },
   build: {
     outDir: 'dist',

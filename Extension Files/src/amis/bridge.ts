@@ -26,6 +26,14 @@ export interface ChromeBridgeApi {
       addListener(listener: (activeInfo: { tabId: number; windowId: number }) => void): void;
       removeListener(listener: (activeInfo: { tabId: number; windowId: number }) => void): void;
     };
+    onUpdated?: {
+      addListener(
+        listener: (tabId: number, changeInfo: { status?: string; url?: string }) => void
+      ): void;
+      removeListener(
+        listener: (tabId: number, changeInfo: { status?: string; url?: string }) => void
+      ): void;
+    };
   };
   scripting: {
     executeScript<TArgs extends unknown[], TResult>(injection: {
@@ -217,11 +225,19 @@ export function subscribeAuthTokenSync(
     refresh();
   };
 
+  const handleUpdated = (_tabId: number, changeInfo: { status?: string; url?: string }) => {
+    if (changeInfo.status === 'complete' || typeof changeInfo.url === 'string') {
+      refresh();
+    }
+  };
+
   refresh();
   api.tabs.onActivated.addListener(handleActivated);
+  api.tabs.onUpdated?.addListener(handleUpdated);
 
   return () => {
     disposed = true;
     api.tabs.onActivated.removeListener(handleActivated);
+    api.tabs.onUpdated?.removeListener(handleUpdated);
   };
 }

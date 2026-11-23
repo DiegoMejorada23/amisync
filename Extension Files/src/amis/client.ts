@@ -45,6 +45,15 @@ export function createTabAmisExecutor(chromeApi?: ChromeBridgeApi): AmisHttpExec
           };
         }
 
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          return {
+            ok: false,
+            status: 0,
+            body: null,
+            networkError: 'Browser is offline. Unable to reach UPLB AMIS.',
+          };
+        }
+
         const apiBase = `https://api-${match[1]}`;
         try {
           const response = await fetch(`${apiBase}${path}`, {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { checkExhaustedCapacity } from '../amis/parser.ts';
 import type { RawAmisCourse } from '../types/amis.ts';
 import type { CourseEntry } from '../types/domain.ts';
 import {
@@ -28,6 +29,7 @@ interface CoursesTabProps {
   intendedCourses: readonly CourseEntry[];
   preEnlistedCourses: readonly CourseEntry[];
   authStatus: AmisConnectionStatus;
+  isOffline: boolean;
   statusMessage: string | null;
   searchError: string | null;
   isSyncing: boolean;
@@ -53,6 +55,7 @@ export function CoursesTab({
   intendedCourses,
   preEnlistedCourses,
   authStatus,
+  isOffline,
   statusMessage,
   searchError,
   isSyncing,
@@ -77,7 +80,7 @@ export function CoursesTab({
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!isConnected || trimmed.length < 2) {
+    if (!isConnected || isOffline || trimmed.length < 2) {
       setSuggestions([]);
       setIsDropdownOpen(false);
       return;
@@ -137,7 +140,7 @@ export function CoursesTab({
           <button
             type="button"
             className="sync-chip-btn"
-            disabled={isSyncing}
+            disabled={isSyncing || isOffline}
             onClick={onSyncAmis}
             title="Fetch active term, pre-enlisted courses, and latest section capacities from AMIS"
           >
@@ -146,8 +149,17 @@ export function CoursesTab({
           </button>
         </div>
 
-        {/* Auth / Session Status Banner when not connected or syncing error */}
-        {authStatus !== 'connected' && (
+        {/* Offline / Auth / Session Status Banners */}
+        {isOffline && (
+          <div className="amis-banner amis-banner--warn" role="status">
+            <span className="amis-banner__text">
+              Browser is offline. Live AMIS sync and course search are paused, while local CP-SAT
+              optimization and QuickXplain diagnosis remain fully available.
+            </span>
+          </div>
+        )}
+
+        {!isOffline && authStatus !== 'connected' && (
           <div className="amis-banner amis-banner--warn" role="status">
             <span className="amis-banner__text">
               {authStatus === 'checking' && 'Checking active UPLB AMIS session...'}
@@ -241,6 +253,7 @@ export function CoursesTab({
               ? `${course.units}`
               : `${Number(course.units.toFixed(1))}`;
             const unitWord = course.units === 1 ? 'unit' : 'units';
+            const isExhausted = checkExhaustedCapacity(course).exhausted;
 
             return (
               <article key={course.instanceId} className="course-card">
@@ -259,6 +272,14 @@ export function CoursesTab({
                       )}
                     </span>
                     <span className="course-card__code">{course.code}</span>
+                    {isExhausted && (
+                      <span
+                        className="course-card__exhausted-pill"
+                        title="0 open non-TBA sections available"
+                      >
+                        0 open
+                      </span>
+                    )}
                     <span className="course-card__meta-pill">
                       {unitsLabel} {unitWord} &bull; {sectionCount} {sectionWord}
                     </span>

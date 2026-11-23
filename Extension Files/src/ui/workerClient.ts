@@ -13,6 +13,30 @@ import type {
 
 const WORKER_SOLVE_TIMEOUT_MS = 35_000;
 
+export class SolverCancelledError extends Error {
+  readonly isCancelled = true;
+
+  constructor(message = 'Solver operation cancelled.') {
+    super(message);
+    this.name = 'SolverCancelledError';
+  }
+}
+
+export function isSolverCancelledError(err: unknown): err is SolverCancelledError {
+  return (
+    err instanceof SolverCancelledError ||
+    (typeof err === 'object' &&
+      err !== null &&
+      'isCancelled' in err &&
+      (err as { isCancelled?: unknown }).isCancelled === true)
+  );
+}
+
+export interface SolverWorkerClientOptions {
+  workerFactory?: () => Worker;
+  timeoutMs?: number;
+}
+
 interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (reason: Error) => void;
@@ -21,17 +45,29 @@ interface PendingRequest<T> {
 
 /**
  * Promise-based client managing the dedicated `solver.worker.ts` Web Worker.
- * Tracks `requestId`s to ignore stale responses after cancellation or respawn.
+ * Cancels superseded in-flight solves immediately and ignores stale responses via `requestId`.
  */
 export class SolverWorkerClient {
   private worker: Worker | null = null;
   private disposed = false;
+  private readonly workerFactory: () => Worker;
+  private readonly timeoutMs: number;
   private smokeWaiters: Array<PendingRequest<WorkerSmokeTestResponse>> = [];
   private solveWaiters = new Map<string, PendingRequest<SolverResponsePayload>>();
   private diagnoseWaiters = new Map<
     string,
     PendingRequest<{ isFeasible: boolean; diagnosis: InfeasibilityDiagnosis | null }>
   >();
+
+  constructor(options?: SolverWorkerClientOptions) {
+    this.workerFactory =
+      options?.workerFactory ??
+      (() =>
+        new Worker(new URL('../workers/solver.worker.ts', import.meta.url), {
+          type: 'module',
+        }));
+    this.timeoutMs = options?.timeoutMs ?? WORKER_SOLVE_TIMEOUT_MS;
+  }
 
   private ensureWorker(): Worker {
     if (this.disposed) {
@@ -41,9 +77,7 @@ export class SolverWorkerClient {
       return this.worker;
     }
 
-    const worker = new Worker(new URL('../workers/solver.worker.ts', import.meta.url), {
-      type: 'module',
-    });
+    const worker = this.workerFactory();
 
     worker.onmessage = (event: MessageEvent<SolverWorkerResponse>) => {
       const msg = event.data;
@@ -127,6 +161,17 @@ export class SolverWorkerClient {
   }
 
   /**
+   * Terminates any in-flight solve/diagnosis run immediately without disposing the client.
+   */
+  cancelInFlight(reason = 'Solver operation cancelled.'): void {
+    if (this.solveWaiters.size === 0 && this.diagnoseWaiters.size === 0 && this.smokeWaiters.length === 0) {
+      return;
+    }
+    this.rejectAllPending(new SolverCancelledError(reason));
+    this.terminateWorkerInstance();
+  }
+
+  /**
    * Warms up `or-tools-wasm` inside the Web Worker ahead of the first user solve.
    */
   warmup(): Promise<WorkerSmokeTestResponse> {
@@ -138,7 +183,7 @@ export class SolverWorkerClient {
           this.smokeWaiters.splice(idx, 1);
         }
         reject(new Error('WASM worker warmup timed out.'));
-      }, WORKER_SOLVE_TIMEOUT_MS);
+      }, this.timeoutMs);
 
       this.smokeWaiters.push({ resolve, reject, timeoutId });
       const req: SolverWorkerRequest = { type: 'SMOKE_TEST' };
@@ -148,8 +193,16 @@ export class SolverWorkerClient {
 
   /**
    * Executes Phase 1 CP-SAT optimization (and automatic Phase 2 QuickXplain on INFEASIBLE).
+   * Cancels and terminates any superseded in-flight solve/diagnosis run before starting.
    */
   solve(plan: AcademicPlanState, options?: SolverExecutionOptions): Promise<SolverResponsePayload> {
+    if (this.disposed) {
+      return Promise.reject(new Error('SolverWorkerClient has been disposed.'));
+    }
+    if (this.solveWaiters.size > 0 || this.diagnoseWaiters.size > 0) {
+      this.cancelInFlight('Superseded by a newer solve request.');
+    }
+
     const worker = this.ensureWorker();
     const requestId = crypto.randomUUID();
 
@@ -158,7 +211,7 @@ export class SolverWorkerClient {
         this.solveWaiters.delete(requestId);
         this.terminateWorkerInstance();
         reject(new Error('Optimization exceeded client safety timeout and the worker was reset.'));
-      }, WORKER_SOLVE_TIMEOUT_MS);
+      }, this.timeoutMs);
 
       this.solveWaiters.set(requestId, { resolve, reject, timeoutId });
       const req: SolverWorkerRequest = {
@@ -173,11 +226,19 @@ export class SolverWorkerClient {
 
   /**
    * Explicitly invokes Phase 2 QuickXplain conflict diagnosis.
+   * Cancels and terminates any superseded in-flight solve/diagnosis run before starting.
    */
   diagnose(
     plan: AcademicPlanState,
     options?: DiagnosisExecutionOptions
   ): Promise<{ isFeasible: boolean; diagnosis: InfeasibilityDiagnosis | null }> {
+    if (this.disposed) {
+      return Promise.reject(new Error('SolverWorkerClient has been disposed.'));
+    }
+    if (this.solveWaiters.size > 0 || this.diagnoseWaiters.size > 0) {
+      this.cancelInFlight('Superseded by a newer diagnosis request.');
+    }
+
     const worker = this.ensureWorker();
     const requestId = crypto.randomUUID();
 
@@ -186,7 +247,7 @@ export class SolverWorkerClient {
         this.diagnoseWaiters.delete(requestId);
         this.terminateWorkerInstance();
         reject(new Error('Conflict diagnosis exceeded client safety timeout.'));
-      }, WORKER_SOLVE_TIMEOUT_MS);
+      }, this.timeoutMs);
 
       this.diagnoseWaiters.set(requestId, { resolve, reject, timeoutId });
       const req: SolverWorkerRequest = {
@@ -203,13 +264,13 @@ export class SolverWorkerClient {
    * Terminates any in-flight WASM run immediately and prepares a fresh worker for subsequent requests.
    */
   cancelAndRespawn(): void {
-    this.rejectAllPending(new Error('Solver operation cancelled by user.'));
+    this.cancelInFlight('Solver operation cancelled by user.');
     this.terminateWorkerInstance();
   }
 
   dispose(): void {
     this.disposed = true;
-    this.rejectAllPending(new Error('SolverWorkerClient disposed.'));
+    this.rejectAllPending(new SolverCancelledError('SolverWorkerClient disposed.'));
     this.terminateWorkerInstance();
   }
 }
