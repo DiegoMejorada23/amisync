@@ -40,6 +40,50 @@ export {
 } from './engine.ts';
 
 export {
+  DEFAULT_QUICKXPLAIN_MAX_CHECKS,
+  DEFAULT_QUICKXPLAIN_PROBE_TIME_LIMIT_SECONDS,
+  DEFAULT_QUICKXPLAIN_TIME_LIMIT_SECONDS,
+  QuickXplainFallbackError,
+  assertQuickXplainBudget,
+  buildForegroundConstraints,
+  buildPureSatSubsetModel,
+  checkSubsetConsistencyPureSat,
+  createQuickXplainBudget,
+  findMinimalConflict,
+  mergeContiguousBlockedCells,
+  quickXplain,
+  verifyMusProperties,
+  type BuiltPureSatModel,
+  type ConsistencyOracle,
+  type ForegroundConstraintItem,
+  type MergedBlockedWindow,
+  type MusVerificationReport,
+  type QuickXplainBudget,
+  type QuickXplainResult,
+  type QuickXplainStatus,
+} from './quickxplain.ts';
+
+export {
+  applyRelaxationToPlan,
+  buildDataInconsistencyDiagnosis,
+  buildExhaustedCapacityDiagnosis,
+  buildRelaxationActionsFromMus,
+  buildResourceFallbackDiagnosis,
+  formatDaySummary,
+  formatMergedTimeWindowSummary,
+  formatMinutesDisplay,
+  formatTimeRange,
+  mapMusToDiagnosis,
+} from './explainer.ts';
+
+export {
+  DEFAULT_MAX_FALLBACK_OPTIONS,
+  diagnoseAcademicPlan,
+  diagnosePreprocessedProblem,
+  type DiagnosisRunResult,
+} from './diagnosis.ts';
+
+export {
   computeScheduleValidityRate,
   validateScheduleAlternative,
   type ScheduleValidationResult,

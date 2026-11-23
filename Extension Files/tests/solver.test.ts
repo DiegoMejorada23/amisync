@@ -923,8 +923,8 @@ describe('Iterative Exclusion & Structural Diversity (Eq. 16)', () => {
   });
 });
 
-describe('Infeasible Schedule Detection (Ready for Milestone 4 QuickXplain)', () => {
-  it('returns clean INFEASIBLE status on unavoidable time overlap between intended courses', async () => {
+describe('Infeasible Schedule Detection & Automatic QuickXplain Diagnosis', () => {
+  it('returns INFEASIBLE with QuickXplain course-overlap MUS on unavoidable time overlap between intended courses', async () => {
     const c1 = makeCourse({
       id: '2001',
       code: 'CMSC 127',
@@ -959,10 +959,14 @@ describe('Infeasible Schedule Detection (Ready for Milestone 4 QuickXplain)', ()
     const res = await solveAcademicPlan(makePlan({ intendedCourses: [c1, c2] }));
     assert.equal(res.status, 'INFEASIBLE');
     assert.deepEqual(res.alternatives, []);
-    assert.equal(res.diagnosis, null);
+    assert.ok(res.diagnosis);
+    assert.equal(res.diagnosis.origin, 'PREFERENCE_CONFLICT');
+    assert.equal(res.diagnosis.isStructuralConflict, true);
+    assert.deepEqual(res.diagnosis.affectedCourseCodes.sort(), ['CMSC 127', 'CMSC 128']);
+    assert.ok(res.timing.musExtractionMs !== undefined && res.timing.musExtractionMs >= 0);
   });
 
-  it('detects infeasibility for the exact thesis Paper Files/2.0.png blocked-time conflict scenario', async () => {
+  it('detects infeasibility and exact MUS for the thesis Paper Files/2.0.png blocked-time conflict scenario', async () => {
     const preLec = makeSection({
       id: '165-S',
       courseId: '165',
@@ -1047,7 +1051,17 @@ describe('Infeasible Schedule Detection (Ready for Milestone 4 QuickXplain)', ()
 
     assert.equal(res.status, 'INFEASIBLE');
     assert.deepEqual(res.alternatives, []);
-    assert.equal(res.diagnosis, null);
+    assert.ok(res.diagnosis);
+    assert.equal(res.diagnosis.origin, 'PREFERENCE_CONFLICT');
+    assert.deepEqual(res.diagnosis.affectedCourseCodes, ['CMSC 128']);
+    assert.equal(
+      res.diagnosis.conflictSummaryBullets[0],
+      'Tue/Thu block conflict: Your blocked hours on Tue/Thu clash directly with the only available sections of CMSC 128.'
+    );
+    assert.equal(
+      res.diagnosis.relaxationSuggestions[0],
+      'Consider unblocking 1:00 PM - 4:00 PM or searching for alternative elective courses.'
+    );
   });
 
   it('detects infeasibility when user hides all available sections or locks conflicting sections', async () => {

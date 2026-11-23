@@ -4,6 +4,7 @@ import {
   setCloudNoticeEnabled,
   setSingleThreadWarningEnabled,
 } from 'or-tools-wasm/cp-sat';
+import { diagnoseAcademicPlan } from '../solver/diagnosis.ts';
 import {
   ensureWasmInitialized,
   getCachedWasmInitMs,
@@ -12,6 +13,8 @@ import {
 import type {
   SolverWorkerRequest,
   SolverWorkerResponse,
+  WorkerDiagnoseRequest,
+  WorkerDiagnoseResponse,
   WorkerSmokeTestResponse,
   WorkerSolveRequest,
   WorkerSolveResponse,
@@ -76,9 +79,39 @@ async function runSolveRequest(request: WorkerSolveRequest): Promise<WorkerSolve
   }
 }
 
+async function runDiagnoseRequest(
+  request: WorkerDiagnoseRequest
+): Promise<WorkerDiagnoseResponse> {
+  try {
+    const result = await diagnoseAcademicPlan(request.plan, request.options);
+    return {
+      type: 'DIAGNOSE_CONFLICTS_RESULT',
+      requestId: request.requestId,
+      ok: true,
+      isFeasible: result.isFeasible,
+      diagnosis: result.diagnosis,
+      timing: {
+        wasmInitMs: result.wasmInitMs,
+        modelConstructionMs: 0,
+        solverExecutionMs: 0,
+        musExtractionMs: result.musExtractionMs,
+      },
+    };
+  } catch (err) {
+    return {
+      type: 'DIAGNOSE_CONFLICTS_RESULT',
+      requestId: request.requestId,
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /**
- * Typed Web Worker message dispatcher supporting both the MV3 WASM smoke test
- * and full Phase 1 CP-SAT schedule optimization requests.
+ * Typed Web Worker message dispatcher supporting:
+ * - MV3 WASM smoke test (`SMOKE_TEST`)
+ * - Phase 1 CP-SAT schedule optimization with automatic Phase 2 QuickXplain on INFEASIBLE (`SOLVE_SCHEDULE`)
+ * - Explicit Phase 2 QuickXplain conflict diagnosis (`DIAGNOSE_CONFLICTS`)
  */
 export async function handleWorkerRequest(
   request: SolverWorkerRequest
@@ -92,6 +125,8 @@ export async function handleWorkerRequest(
       return runSmokeTest();
     case 'SOLVE_SCHEDULE':
       return runSolveRequest(request);
+    case 'DIAGNOSE_CONFLICTS':
+      return runDiagnoseRequest(request);
     default:
       return null;
   }

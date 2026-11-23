@@ -7,6 +7,7 @@ import {
   type NormalizedSection,
 } from '../src/types/domain.ts';
 import type {
+  WorkerDiagnoseRequest,
   WorkerSmokeTestRequest,
   WorkerSolveRequest,
 } from '../src/types/worker.ts';
@@ -109,7 +110,7 @@ describe('Solver Web Worker Typed Request/Response Protocol', () => {
     assert.ok(res.payload.timing.solverExecutionMs >= 0);
   });
 
-  it('handles SOLVE_SCHEDULE request returning clean structured INFEASIBLE status on conflict', async () => {
+  it('handles SOLVE_SCHEDULE on conflict by automatically running QuickXplain and returning explanations + fallback options', async () => {
     const plan = createDefaultAcademicPlanState();
     plan.intendedCourses = [
       makeSimpleCourse('10', 'CMSC 141', [
@@ -134,6 +135,67 @@ describe('Solver Web Worker Typed Request/Response Protocol', () => {
     assert.ok(res.payload);
     assert.equal(res.payload.status, 'INFEASIBLE');
     assert.deepEqual(res.payload.alternatives, []);
-    assert.equal(res.payload.diagnosis, null);
+    assert.ok(res.payload.diagnosis);
+    assert.equal(res.payload.diagnosis.origin, 'PREFERENCE_CONFLICT');
+    assert.equal(res.payload.diagnosis.isStructuralConflict, true);
+    assert.deepEqual(
+      res.payload.diagnosis.affectedCourseCodes.sort(),
+      ['CMSC 141', 'CMSC 142']
+    );
+    assert.ok(res.payload.diagnosis.conflictSummaryBullets.length > 0);
+    assert.ok(res.payload.diagnosis.relaxationSuggestions.length > 0);
+    assert.ok((res.payload.diagnosis.fallbackOptions?.length ?? 0) >= 2);
+    assert.ok(res.payload.timing.musExtractionMs !== undefined && res.payload.timing.musExtractionMs >= 0);
+  });
+
+  it('handles explicit DIAGNOSE_CONFLICTS request for both infeasible and feasible plans', async () => {
+    const infeasiblePlan = createDefaultAcademicPlanState();
+    infeasiblePlan.intendedCourses = [
+      makeSimpleCourse('20', 'STAT 1', [
+        { id: '20-A', section: 'A', day: 'Tuesday', start: 780, end: 900 },
+      ]),
+    ];
+    infeasiblePlan.blockedCells = [
+      { id: 'Tuesday:780-840', day: 'Tuesday', startMinutes: 780, endMinutes: 840 },
+      { id: 'Tuesday:840-900', day: 'Tuesday', startMinutes: 840, endMinutes: 900 },
+    ];
+
+    const diagReq: WorkerDiagnoseRequest = {
+      type: 'DIAGNOSE_CONFLICTS',
+      requestId: 'req-diag-003',
+      plan: infeasiblePlan,
+    };
+
+    const diagRes = await handleWorkerRequest(diagReq);
+    assert.ok(diagRes);
+    assert.equal(diagRes.type, 'DIAGNOSE_CONFLICTS_RESULT');
+    assert.equal(diagRes.requestId, 'req-diag-003');
+    assert.equal(diagRes.ok, true);
+    assert.equal(diagRes.isFeasible, false);
+    assert.ok(diagRes.diagnosis);
+    assert.equal(diagRes.diagnosis.origin, 'PREFERENCE_CONFLICT');
+    assert.deepEqual(diagRes.diagnosis.affectedCourseCodes, ['STAT 1']);
+    assert.ok(
+      diagRes.diagnosis.fallbackOptions?.some(
+        (fb) =>
+          fb.relaxation.actionType === 'UNBLOCK_TIME_WINDOW' &&
+          fb.schedule.selectedSectionIds.includes('20-A')
+      )
+    );
+
+    const feasiblePlan = createDefaultAcademicPlanState();
+    feasiblePlan.intendedCourses = infeasiblePlan.intendedCourses;
+    feasiblePlan.blockedCells = [];
+
+    const feasibleRes = await handleWorkerRequest({
+      type: 'DIAGNOSE_CONFLICTS',
+      requestId: 'req-diag-004',
+      plan: feasiblePlan,
+    });
+    assert.ok(feasibleRes);
+    assert.equal(feasibleRes.type, 'DIAGNOSE_CONFLICTS_RESULT');
+    assert.equal(feasibleRes.ok, true);
+    assert.equal(feasibleRes.isFeasible, true);
+    assert.equal(feasibleRes.diagnosis, null);
   });
 });

@@ -1,5 +1,4 @@
 import {
-  CpModel,
   CpSat,
   setCloudNoticeEnabled,
   setSingleThreadWarningEnabled,
@@ -14,55 +13,29 @@ import type {
   SolverResponsePayload,
   SolverTerminalStatus,
 } from '../types/solver.ts';
-import type { SolverExecutionOptions } from '../types/worker.ts';
+import type {
+  DiagnosisExecutionOptions,
+  SolverExecutionOptions,
+} from '../types/worker.ts';
+import { diagnosePreprocessedProblem } from './diagnosis.ts';
 import { buildCpSatModel, type ExclusionCut } from './modelBuilder.ts';
 import {
   computeObjectiveWeights,
   evaluateSelectionObjective,
 } from './objective.ts';
+import { preprocessAcademicPlan } from './preprocess.ts';
 import {
-  preprocessAcademicPlan,
-  type PreprocessedProblem,
-} from './preprocess.ts';
+  ensureWasmInitialized,
+  getCachedWasmInitMs,
+  mapCpSatStatus,
+} from './wasmRuntime.ts';
 
 setSingleThreadWarningEnabled(false);
 setCloudNoticeEnabled(false);
 
 export const DEFAULT_SOLVER_TIME_LIMIT_SECONDS = 10.0;
 
-let wasmInitialized = false;
-let cachedWasmInitMs = 0;
-
-/**
- * Bootstraps the or-tools-wasm CP-SAT runtime once and profiles cold-start initialization
- * time independently from optimization runs (SPEC.md Section 5.6).
- */
-export async function ensureWasmInitialized(): Promise<{
-  coldStartMs: number;
-  cachedInitMs: number;
-}> {
-  if (wasmInitialized) {
-    return { coldStartMs: 0, cachedInitMs: cachedWasmInitMs };
-  }
-
-  const t0 = performance.now();
-  const warmup = new CpModel();
-  const b = warmup.newBoolVar('wasm_warmup');
-  warmup.addEquality(b, 1);
-  await CpSat.solve(warmup, {
-    executor: 'direct',
-    numWorkers: 1,
-    maxTimeInSeconds: 5.0,
-  });
-  const elapsed = Number((performance.now() - t0).toFixed(2));
-  wasmInitialized = true;
-  cachedWasmInitMs = elapsed;
-  return { coldStartMs: elapsed, cachedInitMs: cachedWasmInitMs };
-}
-
-export function getCachedWasmInitMs(): number {
-  return cachedWasmInitMs;
-}
+export { ensureWasmInitialized, getCachedWasmInitMs };
 
 /**
  * Computes Hamming distance D between two schedules over flexible (non-pre-enlisted) Boolean variables.
@@ -146,39 +119,28 @@ function buildSearchProfile(
   };
 }
 
-function buildExhaustedCapacityDiagnosis(
-  problem: PreprocessedProblem
-): InfeasibilityDiagnosis {
-  const affectedCourseCodes = problem.exhaustedCourses.map((c) => c.courseCode);
+function resolveDiagnosisOptions(
+  options?: SolverExecutionOptions
+): DiagnosisExecutionOptions {
   return {
-    origin: 'EXHAUSTED_CAPACITY',
-    mus: [],
-    hardClashCount: problem.exhaustedCourses.length,
-    conflictSummaryBullets: problem.exhaustedCourses.map(
-      (c) => `Unavailable course: ${c.courseCode} currently has 0 open slots across all sections.`
-    ),
-    relaxationSuggestions: [
-      'Search for an alternative course or refresh AMIS section data later.',
-    ],
-    affectedCourseCodes,
+    ...(options?.diagnosis ?? {}),
+    unitLimits: options?.diagnosis?.unitLimits ?? options?.unitLimits,
+    ...(options?.diagnosis?.randomSeed === undefined && options?.randomSeed !== undefined
+      ? { randomSeed: options.randomSeed }
+      : {}),
   };
 }
 
-function mapCpSatStatus(rawStatusName: string): SolverTerminalStatus {
-  const upper = rawStatusName.toUpperCase();
-  if (upper === 'OPTIMAL' || upper === '4') return 'OPTIMAL';
-  if (upper === 'FEASIBLE' || upper === '2') return 'FEASIBLE';
-  if (upper === 'INFEASIBLE' || upper === '3') return 'INFEASIBLE';
-  return 'TIMEOUT_ABORT';
-}
-
 /**
- * Runs Phase 1 CP-SAT optimization with iterative exclusion (SPEC.md Sections 5.1–5.6):
+ * Runs Phase 1 CP-SAT optimization with iterative exclusion (SPEC.md Sections 5.1–5.6)
+ * and automatically triggers Phase 2 QuickXplain Conflict Diagnosis (SPEC.md Section 6)
+ * whenever the initial solve is INFEASIBLE:
  * - Enforces single-threaded local WASM execution (`executor: 'direct'`, `numWorkers: 1`).
  * - Enforces per-solve heuristic time limit (`10.0s` default).
  * - Generates up to 3 structurally distinct schedules (`Plan A`, `Plan B`, `Plan C`)
  *   satisfying Eq. (16) exclusion cuts and Hamming distance verification (`D >= 2` / `D >= 4`).
- * - Returns a clean `INFEASIBLE` status ready for Milestone 4 QuickXplain when no feasible schedule exists.
+ * - Automatically runs 3-tier conflict triage + QuickXplain MUS extraction + fallback options
+ *   when no feasible schedule exists.
  */
 export async function solveAcademicPlan(
   plan: AcademicPlanState,
@@ -190,17 +152,20 @@ export async function solveAcademicPlan(
   const problem = preprocessAcademicPlan(plan, options?.unitLimits);
   let modelConstructionMs = performance.now() - preprocessStart;
   let solverExecutionMs = 0;
+  const diagOptions = resolveDiagnosisOptions(options);
 
-  // Tier 2 / Preprocessing Early Check: Exhausted capacity before CP-SAT variable creation.
+  // Tier 1 / Tier 2 Preprocessing Early Check: Exhausted capacity before CP-SAT variable creation.
   if (problem.exhaustedCourses.length > 0) {
+    const diagResult = await diagnosePreprocessedProblem(plan, problem, diagOptions);
     return {
       status: 'INFEASIBLE',
       alternatives: [],
-      diagnosis: buildExhaustedCapacityDiagnosis(problem),
+      diagnosis: diagResult.diagnosis,
       timing: {
         wasmInitMs: coldStartMs,
         modelConstructionMs: Number(modelConstructionMs.toFixed(2)),
         solverExecutionMs: 0,
+        musExtractionMs: diagResult.musExtractionMs,
       },
     };
   }
@@ -209,14 +174,18 @@ export async function solveAcademicPlan(
   if (problem.courses.length === 0) {
     const minUnits = problem.unitLimits?.minUnits ?? 0;
     if (minUnits > 0) {
+      const diagResult = options?.skipDiagnosis
+        ? null
+        : await diagnosePreprocessedProblem(plan, problem, diagOptions);
       return {
         status: 'INFEASIBLE',
         alternatives: [],
-        diagnosis: null,
+        diagnosis: diagResult?.diagnosis ?? null,
         timing: {
           wasmInitMs: coldStartMs,
           modelConstructionMs: Number(modelConstructionMs.toFixed(2)),
           solverExecutionMs: 0,
+          ...(diagResult ? { musExtractionMs: diagResult.musExtractionMs } : {}),
         },
       };
     }
@@ -376,14 +345,25 @@ export async function solveAcademicPlan(
         ? 'OPTIMAL'
         : 'FEASIBLE';
 
+  // Phase 2: Automatically invoke QuickXplain Conflict Diagnosis on initial INFEASIBLE solve.
+  let diagnosis: InfeasibilityDiagnosis | null = null;
+  let musExtractionMs: number | undefined;
+
+  if (overallStatus === 'INFEASIBLE' && !options?.skipDiagnosis) {
+    const diagResult = await diagnosePreprocessedProblem(plan, problem, diagOptions);
+    diagnosis = diagResult.diagnosis;
+    musExtractionMs = diagResult.musExtractionMs;
+  }
+
   return {
     status: overallStatus,
     alternatives,
-    diagnosis: null,
+    diagnosis,
     timing: {
       wasmInitMs: coldStartMs,
       modelConstructionMs: Number(modelConstructionMs.toFixed(2)),
       solverExecutionMs: Number(solverExecutionMs.toFixed(2)),
+      ...(musExtractionMs !== undefined ? { musExtractionMs } : {}),
     },
   };
 }
