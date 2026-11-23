@@ -139,6 +139,11 @@ export interface DiversityConfig {
   alternatePreferenceProfiles: boolean;
 }
 
+export interface UnitLimitsConfig {
+  minUnits?: number;
+  maxUnits?: number;
+}
+
 export interface AcademicPlanState {
   schemaVersion: string;            // Versioned chrome.storage.local envelope
   termId: number | null;
@@ -147,6 +152,7 @@ export interface AcademicPlanState {
   blockedCells: BlockedTimeCell[];
   preferences: StudentPreferences;
   diversity: DiversityConfig;
+  unitLimits?: UnitLimitsConfig;    // Optional academic plan unit constraints
   lastRefreshTime: string | null;   // ISO timestamp
 }
 
