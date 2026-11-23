@@ -42,6 +42,12 @@
       backgroundColor: '#F8FAFC',
     });
 
+    backdrop.addEventListener('click', (event: MouseEvent) => {
+      if (event.target === backdrop) {
+        closeOverlay();
+      }
+    });
+
     backdrop.appendChild(iframe);
     document.documentElement.appendChild(backdrop);
   }
