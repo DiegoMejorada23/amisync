@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "AMISync",
+  "version": "1.0.0",
+  "description": "Preference-aware course-section schedule optimizer with QuickXplain infeasibility explanation for UPLB AMIS",
+  "icons": {
+    "16": "icon/16.png",
+    "32": "icon/32.png",
+    "48": "icon/48.png",
+    "128": "icon/128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://amis.uplb.edu.ph/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open AMISync Schedule Optimizer",
+    "default_popup": "index.html"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://amis.uplb.edu.ph/*"],
+      "js": ["content-overlay.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["index.html", "assets/*"],
+      "matches": ["https://amis.uplb.edu.ph/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}
