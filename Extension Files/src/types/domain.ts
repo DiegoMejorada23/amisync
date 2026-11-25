@@ -40,12 +40,21 @@ export interface TimeslotInterval {
   endMinutes: number;     // Integer in [0, 1440]
 }
 
+export interface AcademicTermOption {
+  termId: number;
+  label: string;       // e.g., "1261 - 1st Sem (2026-2027)"
+  shortLabel: string;  // e.g., "1st Sem (2026-2027)"
+  isMidyear: boolean;
+  source: 'api' | 'dom' | 'fallback';
+}
+
 /**
  * Normalized single AMIS class component (e.g., a standalone LEC or a LAB with parentClass).
  */
 export interface NormalizedSection {
   id: string;                        // Stringified AMIS class id
   courseId: string;                  // Stringified AMIS course_id
+  termId?: number | null;            // Academic term ID the section was fetched for
   section: string;                   // e.g., "AB-1L", "S", "S-4L"
   activity: ComponentType | null;    // Normalized: "" -> null
   faculties: FacultyName[];
@@ -77,6 +86,7 @@ export interface CourseEntry {
   instanceId: string;                // crypto.randomUUID()
   id: string;                        // Stringified course_id
   code: string;                      // e.g., "CMSC 128"
+  termId?: number | null;            // Academic term ID the course/sections belong to
   units: number;                     // Parsed float
   canEnrollMultiple: boolean;
   isPreEnlisted: boolean;            // Locked anchor course

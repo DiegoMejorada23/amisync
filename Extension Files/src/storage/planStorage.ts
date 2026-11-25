@@ -1,8 +1,14 @@
 import { validateAcademicPlanState } from '../amis/snapshot.ts';
-import type { AcademicPlanState } from '../types/domain.ts';
+import {
+  DEFAULT_FALLBACK_TERMS,
+  mergeTermOptions,
+  shortenTermSemesterText,
+} from '../amis/terms.ts';
+import type { AcademicPlanState, AcademicTermOption } from '../types/domain.ts';
 import { createDefaultAcademicPlanState, PLAN_SCHEMA_VERSION } from '../types/domain.ts';
 
 export const PLAN_STORAGE_KEY = 'amisync_academic_plan';
+export const TERM_CATALOG_STORAGE_KEY = 'amisync_term_catalog';
 export const MANUAL_REFRESH_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 export const AUTO_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
@@ -190,4 +196,68 @@ export function shouldAutoRefresh(
   }
 
   return now.getTime() - parsedMs >= AUTO_REFRESH_INTERVAL_MS;
+}
+
+function isValidTermOption(value: unknown): value is AcademicTermOption {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.termId === 'number' &&
+    Number.isInteger(obj.termId) &&
+    obj.termId > 0 &&
+    typeof obj.label === 'string' &&
+    obj.label.trim().length > 0 &&
+    typeof obj.shortLabel === 'string' &&
+    obj.shortLabel.trim().length > 0 &&
+    typeof obj.isMidyear === 'boolean' &&
+    (obj.source === 'api' || obj.source === 'dom' || obj.source === 'fallback')
+  );
+}
+
+/**
+ * Loads the persisted term catalog from `chrome.storage.local`, merged with built-in fallback terms.
+ * Self-heals corrupted payloads by removing the bad entry and returning `DEFAULT_FALLBACK_TERMS`.
+ */
+export async function loadTermCatalog(
+  storage?: StorageAreaLike
+): Promise<AcademicTermOption[]> {
+  const area = resolveStorageArea(storage);
+  const result = await area.get(TERM_CATALOG_STORAGE_KEY);
+  const raw = result[TERM_CATALOG_STORAGE_KEY];
+
+  if (!raw) {
+    return [...DEFAULT_FALLBACK_TERMS];
+  }
+
+  if (!Array.isArray(raw) || !raw.every(isValidTermOption)) {
+    await area.remove(TERM_CATALOG_STORAGE_KEY).catch(() => undefined);
+    return [...DEFAULT_FALLBACK_TERMS];
+  }
+
+  const normalized = raw.map((term) => ({
+    ...term,
+    label: shortenTermSemesterText(term.label),
+    shortLabel: shortenTermSemesterText(term.shortLabel),
+  }));
+
+  return mergeTermOptions(normalized, DEFAULT_FALLBACK_TERMS);
+}
+
+/**
+ * Persists discovered academic terms to `chrome.storage.local` via the serialized write queue.
+ */
+export async function saveTermCatalog(
+  terms: readonly AcademicTermOption[],
+  storage?: StorageAreaLike
+): Promise<void> {
+  const area = resolveStorageArea(storage);
+  const normalized = terms.map((term) => ({
+    ...term,
+    label: shortenTermSemesterText(term.label),
+    shortLabel: shortenTermSemesterText(term.shortLabel),
+  }));
+  const sanitized = mergeTermOptions(normalized, DEFAULT_FALLBACK_TERMS);
+  await enqueueStorageWrite(area, () => area.set({ [TERM_CATALOG_STORAGE_KEY]: sanitized }));
 }

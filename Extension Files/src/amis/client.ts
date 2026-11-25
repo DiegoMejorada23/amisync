@@ -1,13 +1,15 @@
 import type {
   RawAmisClass,
   RawAmisCourse,
+  RawAmisTerm,
   RawStudentEnlistmentClass,
 } from '../types/amis.ts';
-import type { CourseEntry } from '../types/domain.ts';
+import type { AcademicTermOption, CourseEntry } from '../types/domain.ts';
 import type { ChromeBridgeApi } from './bridge.ts';
 import { executeInActiveAmisTab } from './bridge.ts';
 import { AmisError } from './errors.ts';
 import { buildCourseEntryFromRaw } from './parser.ts';
+import { formatUplbTermLabel, mergeTermOptions, parseRawTermsPayload } from './terms.ts';
 
 export interface AmisHttpResult {
   ok: boolean;
@@ -179,14 +181,54 @@ export function normalizeCourseSearchQuery(query: string): string {
     .join('+');
 }
 
+export interface ActiveTermScheduleResult {
+  recommendedTermId: number;
+  activeTermId: number | null;
+  nextTermId: number | null;
+  terms: AcademicTermOption[];
+}
+
+function extractTermOptionFromScheduleItem(
+  item: Record<string, unknown> | null
+): AcademicTermOption | null {
+  if (!item) {
+    return null;
+  }
+  const rawTermId = item.term_id;
+  if (typeof rawTermId !== 'number' || !Number.isFinite(rawTermId)) {
+    return null;
+  }
+
+  const nestedTerm = isRecord(item.term) ? (item.term as RawAmisTerm) : null;
+  const rawName =
+    (typeof item.name === 'string' && item.name) ||
+    (typeof item.description === 'string' && item.description) ||
+    (typeof item.term_name === 'string' && item.term_name) ||
+    (nestedTerm &&
+      ((typeof nestedTerm.label === 'string' && nestedTerm.label) ||
+        (typeof nestedTerm.name === 'string' && nestedTerm.name) ||
+        (typeof nestedTerm.description === 'string' && nestedTerm.description) ||
+        (typeof nestedTerm.term_name === 'string' && nestedTerm.term_name))) ||
+    undefined;
+
+  const formatted = formatUplbTermLabel(rawTermId, rawName);
+  return {
+    termId: rawTermId,
+    label: formatted.label,
+    shortLabel: formatted.shortLabel,
+    isMidyear: formatted.isMidyear,
+    source: 'api',
+  };
+}
+
 /**
  * Endpoint 1: `GET /api/scheduled-features/student_enlistment?role=student`
- * Resolves `nextSchedule?.term_id ?? activeTerm.term_id`.
+ * Returns `recommendedTermId` (`nextSchedule?.term_id ?? activeTerm.term_id`) plus discovered term labels.
  */
-export async function fetchActiveTermId(
+export async function fetchActiveTermSchedule(
   token: string,
   executor?: AmisHttpExecutor
-): Promise<number> {
+): Promise<ActiveTermScheduleResult> {
   const body = await requestAmisJson(
     '/api/scheduled-features/student_enlistment?role=student',
     token,
@@ -195,7 +237,9 @@ export async function fetchActiveTermId(
 
   const nextSchedule = isRecord(body.nextSchedule) ? body.nextSchedule : null;
   const activeTerm = isRecord(body.activeTerm) ? body.activeTerm : null;
-  const rawTermId = nextSchedule?.term_id ?? activeTerm?.term_id;
+  const nextOption = extractTermOptionFromScheduleItem(nextSchedule);
+  const activeOption = extractTermOptionFromScheduleItem(activeTerm);
+  const rawTermId = nextOption?.termId ?? activeOption?.termId;
 
   if (typeof rawTermId !== 'number' || !Number.isFinite(rawTermId)) {
     throw new AmisError(
@@ -204,7 +248,57 @@ export async function fetchActiveTermId(
     );
   }
 
-  return rawTermId;
+  const terms = mergeTermOptions(
+    [nextOption, activeOption].filter((t): t is AcademicTermOption => t !== null)
+  );
+
+  return {
+    recommendedTermId: rawTermId,
+    activeTermId: activeOption?.termId ?? null,
+    nextTermId: nextOption?.termId ?? null,
+    terms,
+  };
+}
+
+/**
+ * Endpoint 1: `GET /api/scheduled-features/student_enlistment?role=student`
+ * Resolves `nextSchedule?.term_id ?? activeTerm.term_id`.
+ */
+export async function fetchActiveTermId(
+  token: string,
+  executor?: AmisHttpExecutor
+): Promise<number> {
+  const schedule = await fetchActiveTermSchedule(token, executor);
+  return schedule.recommendedTermId;
+}
+
+/**
+ * Discovers available AMIS terms via read-only `GET /api/terms` (with `/api/students/terms` fallback).
+ * Re-throws authentication/session errors; returns `[]` on 404/network/malformed payloads so
+ * DOM dropdown extraction and built-in fallback terms can take over seamlessly.
+ */
+export async function fetchAmisTerms(
+  token: string,
+  executor?: AmisHttpExecutor
+): Promise<AcademicTermOption[]> {
+  for (const endpoint of ['/api/terms', '/api/students/terms']) {
+    try {
+      const body = await requestAmisJson(endpoint, token, executor);
+      const parsed = parseRawTermsPayload(body);
+      if (parsed.length > 0) {
+        return parsed;
+      }
+    } catch (err) {
+      if (
+        err instanceof AmisError &&
+        (err.code === 'UNAUTHENTICATED' || err.code === 'SESSION_EXPIRED')
+      ) {
+        throw err;
+      }
+      // Continue to fallback endpoint or empty list
+    }
+  }
+  return [];
 }
 
 /**
@@ -226,14 +320,142 @@ export async function searchCoursesByCode(
     executor
   );
 
-  if (!Array.isArray(body.courses)) {
-    throw new AmisError(
-      'MALFORMED_RESPONSE',
-      'AMIS course search response is missing a courses array.'
-    );
+  if (Array.isArray(body.courses)) {
+    return body.courses as RawAmisCourse[];
+  }
+  if (isRecord(body.courses) && Array.isArray(body.courses.data)) {
+    return body.courses.data as RawAmisCourse[];
   }
 
-  return body.courses as RawAmisCourse[];
+  throw new AmisError(
+    'MALFORMED_RESPONSE',
+    'AMIS course search response is missing a courses array.'
+  );
+}
+
+export interface FetchCourseClassesResult {
+  classes: RawAmisClass[];
+  total: number;
+  currentPage: number;
+  lastPage: number;
+}
+
+const MAX_CLASS_PAGES = 50;
+
+/**
+ * Extracts class rows and pagination metadata from either a plain `RawAmisClass[]` array
+ * or a Laravel paginated `{ current_page, data, last_page, total }` object.
+ */
+export function extractPaginatedClasses(rawClasses: unknown): {
+  items: RawAmisClass[];
+  currentPage: number;
+  lastPage: number;
+  total: number;
+} {
+  if (Array.isArray(rawClasses)) {
+    return {
+      items: rawClasses as RawAmisClass[],
+      currentPage: 1,
+      lastPage: 1,
+      total: rawClasses.length,
+    };
+  }
+
+  if (isRecord(rawClasses) && Array.isArray(rawClasses.data)) {
+    const currentPage = rawClasses.current_page ?? 1;
+    const lastPage = rawClasses.last_page ?? 1;
+    const total = rawClasses.total ?? rawClasses.data.length;
+
+    if (
+      typeof currentPage !== 'number' ||
+      !Number.isInteger(currentPage) ||
+      currentPage < 1 ||
+      typeof lastPage !== 'number' ||
+      !Number.isInteger(lastPage) ||
+      lastPage < 1 ||
+      typeof total !== 'number' ||
+      !Number.isInteger(total) ||
+      total < 0
+    ) {
+      throw new AmisError(
+        'MALFORMED_RESPONSE',
+        'AMIS paginated classes response contains invalid pagination metadata.'
+      );
+    }
+
+    return {
+      items: rawClasses.data as RawAmisClass[],
+      currentPage,
+      lastPage,
+      total,
+    };
+  }
+
+  throw new AmisError(
+    'MALFORMED_RESPONSE',
+    'AMIS classes response is missing a classes array or paginated data.'
+  );
+}
+
+/**
+ * Endpoint 3: `GET /api/students/classes?status=Active&by_term_type=true&term_id=...&course_id=...`
+ * Explicitly passes `term_id` on every request and follows Laravel pagination across `last_page`.
+ */
+export async function fetchCourseClassesWithMeta(
+  token: string,
+  termId: number,
+  courseId: string | number,
+  executor?: AmisHttpExecutor
+): Promise<FetchCourseClassesResult> {
+  if (!Number.isFinite(termId)) {
+    throw new AmisError('MALFORMED_RESPONSE', 'Invalid termId provided for class fetch.');
+  }
+
+  const encodedCourseId = encodeURIComponent(String(courseId));
+  const baseQuery = `/api/students/classes?status=Active&by_term_type=true&term_id=${termId}&course_id=${encodedCourseId}`;
+  const firstBody = await requestAmisJson(baseQuery, token, executor);
+  const firstPage = extractPaginatedClasses(firstBody.classes);
+
+  if (
+    firstPage.total === 0 ||
+    (firstPage.items.length === 0 && firstPage.lastPage <= firstPage.currentPage)
+  ) {
+    return {
+      classes: [],
+      total: 0,
+      currentPage: firstPage.currentPage,
+      lastPage: firstPage.lastPage,
+    };
+  }
+
+  const merged: RawAmisClass[] = [];
+  const seenIds = new Set<string>();
+  const appendPageItems = (items: RawAmisClass[]) => {
+    for (const cls of items) {
+      const idKey = cls && cls.id !== undefined && cls.id !== null ? String(cls.id) : '';
+      if (idKey) {
+        if (seenIds.has(idKey)) continue;
+        seenIds.add(idKey);
+      }
+      merged.push(cls);
+    }
+  };
+
+  appendPageItems(firstPage.items);
+
+  const finalPage = Math.min(firstPage.lastPage, MAX_CLASS_PAGES);
+  for (let page = firstPage.currentPage + 1; page <= finalPage; page++) {
+    const pageBody = await requestAmisJson(`${baseQuery}&page=${page}`, token, executor);
+    const pageData = extractPaginatedClasses(pageBody.classes);
+    appendPageItems(pageData.items);
+  }
+
+  return {
+    classes: merged,
+    total: firstPage.total,
+    currentPage: firstPage.currentPage,
+    lastPage: firstPage.lastPage,
+  };
 }
 
 /**
@@ -245,31 +467,14 @@ export async function fetchCourseClasses(
   courseId: string | number,
   executor?: AmisHttpExecutor
 ): Promise<RawAmisClass[]> {
-  if (!Number.isFinite(termId)) {
-    throw new AmisError('MALFORMED_RESPONSE', 'Invalid termId provided for class fetch.');
-  }
-
-  const encodedCourseId = encodeURIComponent(String(courseId));
-  const body = await requestAmisJson(
-    `/api/students/classes?status=Active&by_term_type=true&term_id=${termId}&course_id=${encodedCourseId}`,
-    token,
-    executor
-  );
-
-  if (!Array.isArray(body.classes)) {
-    throw new AmisError(
-      'MALFORMED_RESPONSE',
-      'AMIS classes response is missing a classes array.'
-    );
-  }
-
-  return body.classes as RawAmisClass[];
+  const result = await fetchCourseClassesWithMeta(token, termId, courseId, executor);
+  return result.classes;
 }
 
 /**
  * Searches for an exact course code match (case-insensitive), queries all duplicate `course_id`
  * records in parallel via Endpoint 3, selects the first with non-empty classes, and normalizes
- * into a `CourseEntry`.
+ * into a `CourseEntry` tagged with `termId`.
  */
 export async function fetchCourseWithClasses(
   token: string,
@@ -293,18 +498,37 @@ export async function fetchCourseWithClasses(
     throw new AmisError('COURSE_NOT_FOUND', `Course not found: ${courseCode.trim()}`);
   }
 
-  const classLists = await Promise.all(
-    exactMatches.map((course) => fetchCourseClasses(token, termId, course.course_id, executor))
+  const classResults = await Promise.all(
+    exactMatches.map((course) =>
+      fetchCourseClassesWithMeta(token, termId, course.course_id, executor)
+    )
   );
 
-  const nonEmptyIndex = classLists.findIndex((classes) => classes.length > 0);
+  const nonEmptyIndex = classResults.findIndex(
+    (result) => result.total > 0 && result.classes.length > 0
+  );
   if (nonEmptyIndex === -1) {
-    throw new AmisError('NO_CLASSES_FOUND', `Course has no classes: ${courseCode.trim()}`);
+    throw new AmisError(
+      'NO_CLASSES_FOUND',
+      `No sections published yet for ${courseCode.trim()} in term ${termId}.`,
+      {
+        details: {
+          termId,
+          courseCode: courseCode.trim(),
+          total: 0,
+        },
+      }
+    );
   }
 
-  return buildCourseEntryFromRaw(exactMatches[nonEmptyIndex], classLists[nonEmptyIndex], {
-    isPreEnlisted: false,
-  });
+  return buildCourseEntryFromRaw(
+    exactMatches[nonEmptyIndex],
+    classResults[nonEmptyIndex].classes,
+    {
+      isPreEnlisted: false,
+      termId,
+    }
+  );
 }
 
 /**
@@ -341,7 +565,8 @@ interface GroupedEnlistmentBucket {
 
 function groupEnlistmentItems(
   items: RawStudentEnlistmentClass[],
-  isPreEnlisted: boolean
+  isPreEnlisted: boolean,
+  termId: number
 ): CourseEntry[] {
   const byCourseId = new Map<string, GroupedEnlistmentBucket>();
 
@@ -361,7 +586,7 @@ function groupEnlistmentItems(
   }
 
   return Array.from(byCourseId.values()).map(({ course, classes }) =>
-    buildCourseEntryFromRaw(course, classes, { isPreEnlisted })
+    buildCourseEntryFromRaw(course, classes, { isPreEnlisted, termId })
   );
 }
 
@@ -425,7 +650,7 @@ export async function fetchStudentEnlistments(
   }
 
   return {
-    preEnlistedCourses: groupEnlistmentItems(preEnlistedItems, true),
-    bookmarkedCourses: groupEnlistmentItems(bookmarkedItems, false),
+    preEnlistedCourses: groupEnlistmentItems(preEnlistedItems, true, termId),
+    bookmarkedCourses: groupEnlistmentItems(bookmarkedItems, false, termId),
   };
 }

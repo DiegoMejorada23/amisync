@@ -118,20 +118,33 @@ export function toggleCourseAccordion(
 /**
  * Adds a newly fetched AMIS course or updates an existing non-repeatable course in place,
  * preserving user section flags (`isHidden`, `isLocked`, `isStarred`) keyed by `section.id`.
+ * Drops any stale courses explicitly tagged with a different `termId` to preserve term isolation.
  */
 export function addOrUpdateIntendedCourse(
   plan: AcademicPlanState,
   incomingCourse: CourseEntry
 ): AcademicPlanState {
+  const incomingTermId =
+    typeof incomingCourse.termId === 'number' && Number.isFinite(incomingCourse.termId)
+      ? incomingCourse.termId
+      : null;
+
+  const sameTermIntended =
+    incomingTermId !== null
+      ? plan.intendedCourses.filter(
+          (c) => typeof c.termId !== 'number' || c.termId === incomingTermId
+        )
+      : plan.intendedCourses;
+
   const existingIdx = !incomingCourse.canEnrollMultiple
-    ? plan.intendedCourses.findIndex((c) => c.id === incomingCourse.id)
+    ? sameTermIntended.findIndex((c) => c.id === incomingCourse.id)
     : -1;
 
   if (existingIdx === -1) {
     return {
       ...plan,
       intendedCourses: [
-        ...plan.intendedCourses,
+        ...sameTermIntended,
         {
           ...incomingCourse,
           isPreEnlisted: false,
@@ -141,7 +154,7 @@ export function addOrUpdateIntendedCourse(
     };
   }
 
-  const existing = plan.intendedCourses[existingIdx];
+  const existing = sameTermIntended[existingIdx];
   const prevFlagsBySectionId = new Map(
     existing.sections.map((opt) => [opt.section.id, opt.flags])
   );
@@ -162,12 +175,32 @@ export function addOrUpdateIntendedCourse(
     }),
   };
 
-  const nextCourses = [...plan.intendedCourses];
+  const nextCourses = [...sameTermIntended];
   nextCourses[existingIdx] = mergedCourse;
 
   return {
     ...plan,
     intendedCourses: nextCourses,
+  };
+}
+
+/**
+ * Switches the active academic term on the plan, retaining only courses tagged with
+ * `nextTermId` and resetting `lastRefreshTime` so a fresh term sync can run immediately.
+ */
+export function switchPlanTerm(
+  plan: AcademicPlanState,
+  nextTermId: number
+): AcademicPlanState {
+  if (plan.termId === nextTermId) {
+    return plan;
+  }
+  return {
+    ...plan,
+    termId: nextTermId,
+    preEnlistedCourses: plan.preEnlistedCourses.filter((c) => c.termId === nextTermId),
+    intendedCourses: plan.intendedCourses.filter((c) => c.termId === nextTermId),
+    lastRefreshTime: null,
   };
 }
 

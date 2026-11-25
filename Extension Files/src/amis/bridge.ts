@@ -1,4 +1,6 @@
+import type { AcademicTermOption } from '../types/domain.ts';
 import { AmisError } from './errors.ts';
+import { parseTermDropdownEntries } from './terms.ts';
 
 /**
  * URL pattern matching UP AMIS portals (e.g., https://amis.uplb.edu.ph/*).
@@ -240,4 +242,118 @@ export function subscribeAuthTokenSync(
     api.tabs.onActivated.removeListener(handleActivated);
     api.tabs.onUpdated?.removeListener(handleUpdated);
   };
+}
+
+/**
+ * Performs read-only inspection of the active AMIS tab's Term dropdown (`<select>` or
+ * custom listbox options) to discover live term IDs and labels.
+ */
+export async function extractTermsFromActiveAmisTab(
+  chromeApi?: ChromeBridgeApi
+): Promise<{ terms: AcademicTermOption[]; selectedTermId: number | null }> {
+  const api = resolveChromeBridgeApi(chromeApi);
+  const amisTab = await getActiveAmisTab(api);
+  if (!amisTab) {
+    return { terms: [], selectedTermId: null };
+  }
+
+  try {
+    const results = await api.scripting.executeScript({
+      target: { tabId: amisTab.id },
+      // Must remain completely self-contained for MV3 executeScript serialization.
+      func: (): Array<{ value: string; text: string; selected: boolean }> => {
+        const collected: Array<{ value: string; text: string; selected: boolean }> = [];
+        const selects = Array.from(document.querySelectorAll('select'));
+
+        let bestSelect: HTMLSelectElement | null = null;
+        let bestScore = 0;
+
+        for (const select of selects) {
+          const id = select.id ?? '';
+          const name = select.getAttribute('name') ?? '';
+          const ariaLabel = select.getAttribute('aria-label') ?? '';
+          let labelText = '';
+          if (id) {
+            const labelEl = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+            labelText = labelEl?.textContent ?? '';
+          }
+          if (!labelText) {
+            const parentLabel = select.closest('label');
+            labelText = parentLabel?.textContent ?? '';
+          }
+
+          const metaText = `${id} ${name} ${ariaLabel} ${labelText}`.toLowerCase();
+          const options = Array.from(select.options);
+          const hasTermMeta = /\bterm\b|semester|academic/.test(metaText);
+          const matchingOptionCount = options.filter((opt) => {
+            const val = (opt.value ?? '').trim();
+            const txt = (opt.textContent ?? '').trim();
+            return (
+              /^\d{3,5}$/.test(val) ||
+              /\b1\d{3}\b/.test(txt) ||
+              /semester|midyear/i.test(txt)
+            );
+          }).length;
+
+          if (matchingOptionCount === 0 && !hasTermMeta) {
+            continue;
+          }
+
+          const score = (hasTermMeta ? 100 : 0) + matchingOptionCount;
+          if (score > bestScore && matchingOptionCount > 0) {
+            bestScore = score;
+            bestSelect = select;
+          }
+        }
+
+        if (bestSelect) {
+          for (const opt of Array.from(bestSelect.options)) {
+            collected.push({
+              value: (opt.value ?? '').trim(),
+              text: (opt.textContent ?? '').trim(),
+              selected: Boolean(opt.selected),
+            });
+          }
+          return collected;
+        }
+
+        const customItems = Array.from(
+          document.querySelectorAll(
+            '[role="option"], [data-term-id], .v-list-item, .el-select-dropdown__item'
+          )
+        );
+        for (const el of customItems) {
+          const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ');
+          const dataTermId = el.getAttribute('data-term-id') ?? '';
+          const dataValue = el.getAttribute('data-value') ?? dataTermId;
+          const matchesTerm =
+            /^\d{3,5}$/.test(dataTermId.trim()) ||
+            /\b1\d{3}\b.*(?:semester|midyear)/i.test(text) ||
+            /^\s*1\d{3}\s*[-–]/.test(text);
+          if (!matchesTerm) {
+            continue;
+          }
+          const isSelected =
+            el.getAttribute('aria-selected') === 'true' ||
+            el.classList.contains('selected') ||
+            el.classList.contains('is-selected');
+          collected.push({
+            value: dataValue.trim(),
+            text,
+            selected: isSelected,
+          });
+        }
+
+        return collected;
+      },
+    });
+
+    const rawEntries = results[0]?.result;
+    if (!Array.isArray(rawEntries)) {
+      return { terms: [], selectedTermId: null };
+    }
+    return parseTermDropdownEntries(rawEntries);
+  } catch {
+    return { terms: [], selectedTermId: null };
+  }
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { shortenTermSemesterText } from '../amis/index.ts';
 import { checkExhaustedCapacity } from '../amis/parser.ts';
 import type { RawAmisCourse } from '../types/amis.ts';
-import type { CourseEntry } from '../types/domain.ts';
+import type { AcademicTermOption, CourseEntry } from '../types/domain.ts';
 import {
   formatSectionScheduleLines,
   getCapacityBadgeTone,
@@ -28,6 +29,9 @@ export type AmisConnectionStatus =
 interface CoursesTabProps {
   intendedCourses: readonly CourseEntry[];
   preEnlistedCourses: readonly CourseEntry[];
+  selectedTermId: number;
+  availableTerms: readonly AcademicTermOption[];
+  emptyTermSuggestion: AcademicTermOption | null;
   authStatus: AmisConnectionStatus;
   isOffline: boolean;
   statusMessage: string | null;
@@ -37,6 +41,7 @@ interface CoursesTabProps {
   isSolving: boolean;
   isSolveBlocked: boolean;
   canGenerate: boolean;
+  onSelectTerm: (termId: number) => void;
   onSyncAmis: () => void;
   onSearchSuggestions: (query: string) => Promise<RawAmisCourse[]>;
   onAddCourseByCode: (courseCode: string) => Promise<boolean>;
@@ -54,6 +59,9 @@ interface CoursesTabProps {
 export function CoursesTab({
   intendedCourses,
   preEnlistedCourses,
+  selectedTermId,
+  availableTerms,
+  emptyTermSuggestion,
   authStatus,
   isOffline,
   statusMessage,
@@ -63,6 +71,7 @@ export function CoursesTab({
   isSolving,
   isSolveBlocked,
   canGenerate,
+  onSelectTerm,
   onSyncAmis,
   onSearchSuggestions,
   onAddCourseByCode,
@@ -131,112 +140,149 @@ export function CoursesTab({
 
   return (
     <div className="tab-panel">
-      <div className="tab-panel__scroll">
-        {/* Search Header + Live AMIS Sync Bar */}
-        <div className="search-header-row">
-          <label className="section-overline" htmlFor="amisync-course-search">
-            ADD DESIRED COURSES
-          </label>
-          <button
-            type="button"
-            className="sync-chip-btn"
-            disabled={isSyncing || isOffline}
-            onClick={onSyncAmis}
-            title="Fetch active term, pre-enlisted courses, and latest section capacities from AMIS"
-          >
-            <RefreshIcon width={12} height={12} className={isSyncing ? 'spin-icon' : ''} />
-            <span>{isSyncing ? 'Syncing...' : 'Sync AMIS'}</span>
-          </button>
-        </div>
-
-        {/* Offline / Auth / Session Status Banners */}
-        {isOffline && (
-          <div className="amis-banner amis-banner--warn" role="status">
-            <span className="amis-banner__text">
-              Browser is offline. Live AMIS sync and course search are paused, while local CP-SAT
-              optimization and QuickXplain diagnosis remain fully available.
-            </span>
+      <div className="courses-panel__body">
+        <div className="courses-panel__controls">
+          {/* Search Header + Live AMIS Sync Bar */}
+          <div className="search-header-row">
+            <label className="section-overline" htmlFor="amisync-course-search">
+              ADD DESIRED COURSES
+            </label>
+            <button
+              type="button"
+              className="sync-chip-btn"
+              disabled={isSyncing || isOffline}
+              onClick={onSyncAmis}
+              title="Fetch active term, pre-enlisted courses, and latest section capacities from AMIS"
+            >
+              <RefreshIcon width={12} height={12} className={isSyncing ? 'spin-icon' : ''} />
+              <span>{isSyncing ? 'Syncing...' : 'Sync AMIS'}</span>
+            </button>
           </div>
-        )}
 
-        {!isOffline && authStatus !== 'connected' && (
-          <div className="amis-banner amis-banner--warn" role="status">
-            <span className="amis-banner__text">
-              {authStatus === 'checking' && 'Checking active UPLB AMIS session...'}
-              {authStatus === 'not_on_amis' &&
-                'Open an authenticated UPLB AMIS tab (amis.uplb.edu.ph) to fetch live courses.'}
-              {authStatus === 'unauthenticated' &&
-                'You are not signed in to AMIS. Sign in on your active AMIS tab, then click Sync AMIS.'}
-              {authStatus === 'expired' &&
-                'Your AMIS session expired (401/403). Refresh and sign in on AMIS, then click Sync AMIS.'}
-            </span>
-          </div>
-        )}
+          {/* Offline / Auth / Session Status Banners */}
+          {isOffline && (
+            <div className="amis-banner amis-banner--warn" role="status">
+              <span className="amis-banner__text">
+                Browser is offline. Live AMIS sync and course search are paused, while local CP-SAT
+                optimization and QuickXplain diagnosis remain fully available.
+              </span>
+            </div>
+          )}
 
-        {statusMessage && (
-          <div className="amis-banner amis-banner--info" role="status">
-            <span className="amis-banner__text">{statusMessage}</span>
-          </div>
-        )}
+          {!isOffline && authStatus !== 'connected' && (
+            <div className="amis-banner amis-banner--warn" role="status">
+              <span className="amis-banner__text">
+                {authStatus === 'checking' && 'Checking active UPLB AMIS session...'}
+                {authStatus === 'not_on_amis' &&
+                  'Open an authenticated UPLB AMIS tab (amis.uplb.edu.ph) to fetch live courses.'}
+                {authStatus === 'unauthenticated' &&
+                  'You are not signed in to AMIS. Sign in on your active AMIS tab, then click Sync AMIS.'}
+                {authStatus === 'expired' &&
+                  'Your AMIS session expired (401/403). Refresh and sign in on AMIS, then click Sync AMIS.'}
+              </span>
+            </div>
+          )}
 
-        {/* Search Box */}
-        <form
-          className="course-search-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void handleSubmitCourse(query);
-          }}
-        >
-          <div className="course-search-box">
-            <SearchIcon width={15} height={15} className="course-search-box__icon" />
-            <input
-              id="amisync-course-search"
-              type="text"
-              className="course-search-box__input"
-              placeholder={
-                isConnected
-                  ? 'Type course code (e.g., CMSC 128) & press Enter'
-                  : 'Course code search (requires active AMIS tab)'
-              }
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape' && isDropdownOpen) {
-                  e.stopPropagation();
-                  setIsDropdownOpen(false);
+          {statusMessage && (
+            <div className="amis-banner amis-banner--info" role="status">
+              <span className="amis-banner__text">{statusMessage}</span>
+            </div>
+          )}
+
+          {/* Academic Term / Semester Selector */}
+          <div className="term-selector-row">
+            <label className="term-selector__label" htmlFor="amisync-term-select">
+              ACADEMIC TERM
+            </label>
+            <select
+              id="amisync-term-select"
+              className="term-selector__select"
+              value={selectedTermId}
+              disabled={isSyncing || isAddingCourse}
+              onChange={(e) => {
+                const parsed = Number.parseInt(e.target.value, 10);
+                if (Number.isInteger(parsed) && parsed > 0) {
+                  onSelectTerm(parsed);
                 }
               }}
-              aria-autocomplete="list"
-              aria-expanded={isDropdownOpen}
-            />
-            {isAddingCourse && <span className="search-inline-spinner" aria-label="Loading course" />}
-          </div>
-
-          {isDropdownOpen && suggestions.length > 0 && (
-            <ul className="course-autocomplete" role="listbox">
-              {suggestions.map((item) => (
-                <li key={`${item.course_id}-${item.course_code}`}>
-                  <button
-                    type="button"
-                    className="course-autocomplete__item"
-                    onClick={() => void handleSubmitCourse(item.course_code)}
-                  >
-                    <span className="course-autocomplete__code">{item.course_code}</span>
-                    <span className="course-autocomplete__units">{item.units} units</span>
-                  </button>
-                </li>
+            >
+              {availableTerms.map((term) => (
+                <option key={term.termId} value={term.termId}>
+                  {shortenTermSemesterText(term.label)}
+                </option>
               ))}
-            </ul>
-          )}
-        </form>
-
-        {searchError && (
-          <div className="amis-banner amis-banner--error" role="alert">
-            <span className="amis-banner__text">{searchError}</span>
+            </select>
           </div>
-        )}
 
-        {/* Expandable Intended Course Accordions */}
+          {/* Search Box */}
+          <form
+            className="course-search-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleSubmitCourse(query);
+            }}
+          >
+            <div className="course-search-box">
+              <SearchIcon width={15} height={15} className="course-search-box__icon" />
+              <input
+                id="amisync-course-search"
+                type="text"
+                className="course-search-box__input"
+                placeholder={
+                  isConnected
+                    ? 'Type course code (e.g., CMSC 128) & press Enter'
+                    : 'Course code search (requires active AMIS tab)'
+                }
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && isDropdownOpen) {
+                    e.stopPropagation();
+                    setIsDropdownOpen(false);
+                  }
+                }}
+                aria-autocomplete="list"
+                aria-expanded={isDropdownOpen}
+              />
+              {isAddingCourse && <span className="search-inline-spinner" aria-label="Loading course" />}
+            </div>
+
+            {isDropdownOpen && suggestions.length > 0 && (
+              <ul className="course-autocomplete" role="listbox">
+                {suggestions.map((item) => (
+                  <li key={`${item.course_id}-${item.course_code}`}>
+                    <button
+                      type="button"
+                      className="course-autocomplete__item"
+                      onClick={() => void handleSubmitCourse(item.course_code)}
+                    >
+                      <span className="course-autocomplete__code">{item.course_code}</span>
+                      <span className="course-autocomplete__units">{item.units} units</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </form>
+
+          {searchError && (
+            <div className="amis-banner amis-banner--error amis-banner--with-action" role="alert">
+              <span className="amis-banner__text">{searchError}</span>
+              {emptyTermSuggestion && (
+                <button
+                  type="button"
+                  className="amis-banner__action-btn"
+                  disabled={isSyncing || isAddingCourse}
+                  onClick={() => onSelectTerm(emptyTermSuggestion.termId)}
+                >
+                  Switch to {emptyTermSuggestion.termId}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Expandable Intended Course Accordions (scrolls internally only if needed) */}
         <div className="courses-list">
           {intendedCourses.length === 0 && (
             <div className="empty-courses-hint">
@@ -299,7 +345,9 @@ export function CoursesTab({
                 {course.isExpanded && (
                   <div className="course-card__sections">
                     {course.sections.length === 0 ? (
-                      <div className="section-empty-note">No active sections found for this term.</div>
+                      <div className="section-empty-note">
+                        No active sections found for term {selectedTermId}.
+                      </div>
                     ) : (
                       course.sections.map((option) => {
                         const sec = option.section;

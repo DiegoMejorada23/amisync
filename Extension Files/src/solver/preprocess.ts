@@ -142,11 +142,52 @@ interface RawNodeAccumulator {
   flags: SectionUserFlags;
 }
 
+function resolveEffectiveTermId(plan: AcademicPlanState): number | null {
+  if (typeof plan.termId === 'number' && Number.isFinite(plan.termId)) {
+    return plan.termId;
+  }
+  for (const course of [...plan.preEnlistedCourses, ...plan.intendedCourses]) {
+    if (typeof course.termId === 'number' && Number.isFinite(course.termId)) {
+      return course.termId;
+    }
+    for (const opt of course.sections) {
+      if (typeof opt.section.termId === 'number' && Number.isFinite(opt.section.termId)) {
+        return opt.section.termId;
+      }
+      if (
+        opt.section.parentClass &&
+        typeof opt.section.parentClass.termId === 'number' &&
+        Number.isFinite(opt.section.parentClass.termId)
+      ) {
+        return opt.section.parentClass.termId;
+      }
+    }
+  }
+  return null;
+}
+
+function sectionChainMatchesTerm(section: NormalizedSection, effectiveTermId: number | null): boolean {
+  if (effectiveTermId === null) {
+    return true;
+  }
+  if (typeof section.termId === 'number' && section.termId !== effectiveTermId) {
+    return false;
+  }
+  if (section.parentClass && !sectionChainMatchesTerm(section.parentClass, effectiveTermId)) {
+    return false;
+  }
+  return true;
+}
+
 function collectCourseNodesFromOption(
   option: CourseSectionOption,
   courseIsPreEnlisted: boolean,
-  accMap: Map<string, RawNodeAccumulator>
+  accMap: Map<string, RawNodeAccumulator>,
+  effectiveTermId: number | null
 ): void {
+  if (!sectionChainMatchesTerm(option.section, effectiveTermId)) {
+    return;
+  }
   const leafPreEnlisted = courseIsPreEnlisted || option.isPreEnlisted;
 
   const upsertSection = (
@@ -203,10 +244,12 @@ function collectCourseNodesFromOption(
 /**
  * Merges pre-enlisted and intended course entries when the same non-repeatable course
  * appears in both lists (partial pre-enlistment, e.g., pre-enlisted LEC + intended LAB).
+ * Enforces cross-term isolation by excluding courses or sections tagged with a different `termId`.
  */
 function mergeCourseEntries(
   preEnlistedCourses: CourseEntry[],
-  intendedCourses: CourseEntry[]
+  intendedCourses: CourseEntry[],
+  effectiveTermId: number | null
 ): Array<{
   courseKey: string;
   courseId: string;
@@ -230,6 +273,14 @@ function mergeCourseEntries(
   const byCourseId = new Map<string, (typeof merged)[number]>();
 
   const addCourse = (course: CourseEntry, fromPreEnlistedList: boolean) => {
+    if (
+      effectiveTermId !== null &&
+      typeof course.termId === 'number' &&
+      course.termId !== effectiveTermId
+    ) {
+      return;
+    }
+
     const courseIsPre = fromPreEnlistedList || course.isPreEnlisted;
     const existing = !course.canEnrollMultiple ? byCourseId.get(course.id) : undefined;
 
@@ -241,7 +292,7 @@ function mergeCourseEntries(
         existing.rawRequiredComponents.add(normalizeComponentType(comp));
       }
       for (const option of course.sections) {
-        collectCourseNodesFromOption(option, courseIsPre, existing.accMap);
+        collectCourseNodesFromOption(option, courseIsPre, existing.accMap, effectiveTermId);
       }
       return;
     }
@@ -252,7 +303,7 @@ function mergeCourseEntries(
     );
 
     for (const option of course.sections) {
-      collectCourseNodesFromOption(option, courseIsPre, accMap);
+      collectCourseNodesFromOption(option, courseIsPre, accMap, effectiveTermId);
     }
 
     const record = {
@@ -322,7 +373,12 @@ export function preprocessAcademicPlan(
   plan: AcademicPlanState,
   unitLimitsOverride?: UnitLimitsConfig
 ): PreprocessedProblem {
-  const mergedCourses = mergeCourseEntries(plan.preEnlistedCourses, plan.intendedCourses);
+  const effectiveTermId = resolveEffectiveTermId(plan);
+  const mergedCourses = mergeCourseEntries(
+    plan.preEnlistedCourses,
+    plan.intendedCourses,
+    effectiveTermId
+  );
 
   const courses: PreprocessedCourse[] = [];
   const nodes: SolverSectionNode[] = [];

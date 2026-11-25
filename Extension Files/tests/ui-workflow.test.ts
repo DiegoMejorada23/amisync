@@ -11,6 +11,7 @@ import {
   addOrUpdateIntendedCourse,
   applyRelaxationActionToPlan,
   removeIntendedCourse,
+  switchPlanTerm,
   toggleBlockedCell,
   toggleCourseAccordion,
   toggleSectionFlag,
@@ -452,5 +453,100 @@ describe('Milestone 5 UI View Models, Reducers & End-to-End HITL Workflow', () =
     assert.ok(selectedIds.includes('165-lab'));
     assert.ok(selectedIds.includes('12800'));
     assert.ok(selectedIds.includes('12801') || selectedIds.includes('12802'));
+  });
+
+  it('isolates courses and sections by termId across switchPlanTerm and CP-SAT solving', async () => {
+    const course1261: CourseEntry = {
+      ...makeRawPreEnlistedCourse(),
+      instanceId: 'inst-1261',
+      id: '165',
+      code: 'CMSC 165',
+      termId: 1261,
+      isPreEnlisted: false,
+      sections: makeRawPreEnlistedCourse().sections.map((opt) => ({
+        ...opt,
+        isPreEnlisted: false,
+        section: {
+          ...opt.section,
+          termId: 1261,
+          activeClassSize: 10,
+          maxClassSize: 30,
+          parentClass: opt.section.parentClass
+            ? {
+                ...opt.section.parentClass,
+                termId: 1261,
+                activeClassSize: 20,
+                maxClassSize: 60,
+              }
+            : null,
+        },
+      })),
+    };
+
+    const course1262: CourseEntry = {
+      instanceId: 'inst-1262',
+      id: '999',
+      code: 'STAT 1',
+      termId: 1262,
+      units: 3,
+      canEnrollMultiple: false,
+      isPreEnlisted: false,
+      requiredComponents: ['LEC'],
+      isExpanded: true,
+      sections: [
+        {
+          isPreEnlisted: false,
+          flags: { isHidden: false, isLocked: false, isStarred: false },
+          section: {
+            id: '999-lec',
+            courseId: '999',
+            termId: 1262,
+            section: 'A',
+            activity: 'LEC',
+            faculties: [],
+            location: 'PS C100',
+            dates: [
+              {
+                days: ['Monday', 'Wednesday'],
+                startTime: '09:00 AM',
+                endTime: '10:30 AM',
+                startMinutes: 540,
+                endMinutes: 630,
+              },
+            ],
+            activeClassSize: 5,
+            maxClassSize: 30,
+            isPrerogOpen: false,
+            parentClassId: null,
+            parentClass: null,
+          },
+        },
+      ],
+    };
+
+    // Even if a stale 1262 course sits alongside a 1261 plan, the solver strictly isolates to 1261.
+    const mixedPlan = createDefaultAcademicPlanState();
+    mixedPlan.termId = 1261;
+    mixedPlan.intendedCourses = [course1261, course1262];
+
+    const solved = await handleWorkerRequest({
+      type: 'SOLVE_SCHEDULE',
+      requestId: 'term-isolation-1',
+      plan: mixedPlan,
+    });
+    assert.ok(solved && solved.type === 'SOLVE_SCHEDULE_RESULT' && solved.ok);
+    assert.equal(solved.payload?.status, 'OPTIMAL');
+    const selectedIds = solved.payload?.alternatives[0]?.selectedSectionIds ?? [];
+    assert.ok(selectedIds.includes('165-lec'));
+    assert.ok(selectedIds.includes('165-lab'));
+    assert.ok(!selectedIds.includes('999-lec'));
+
+    // Switching the plan term to 1262 evicts 1261 courses and keeps only 1262 courses.
+    const switched = switchPlanTerm(mixedPlan, 1262);
+    assert.equal(switched.termId, 1262);
+    assert.deepEqual(
+      switched.intendedCourses.map((c) => c.code),
+      ['STAT 1']
+    );
   });
 });

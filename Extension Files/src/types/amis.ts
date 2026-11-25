@@ -2,9 +2,45 @@
  * Raw AMIS REST API payload contracts matching SPEC.md Section 4.1.
  */
 
+export interface RawLaravelPaginator<T> {
+  current_page: number;
+  data: T[];
+  last_page: number;
+  total: number;
+  per_page?: number;
+  from?: number | null;
+  to?: number | null;
+  next_page_url?: string | null;
+  prev_page_url?: string | null;
+}
+
+export interface RawAmisTerm {
+  id?: number | string;
+  term_id?: number | string;
+  code?: number | string;
+  term_code?: number | string;
+  name?: string;
+  label?: string;
+  description?: string;
+  term_name?: string;
+  academic_year?: string;
+  semester?: string;
+  is_active?: boolean;
+}
+
+export interface RawAmisTermScheduleItem {
+  term_id: number;
+  name?: string;
+  description?: string;
+  term_name?: string;
+  academic_year?: string;
+  semester?: string;
+  term?: RawAmisTerm;
+}
+
 export interface RawAmisTermScheduleResponse {
-  nextSchedule?: { term_id: number } | null;
-  activeTerm: { term_id: number };
+  nextSchedule?: RawAmisTermScheduleItem | null;
+  activeTerm: RawAmisTermScheduleItem;
 }
 
 export interface RawAmisAuthUserResponse {
@@ -21,7 +57,7 @@ export interface RawAmisCourse {
 }
 
 export interface RawAmisCoursesResponse {
-  courses: RawAmisCourse[];
+  courses: RawAmisCourse[] | RawLaravelPaginator<RawAmisCourse>;
 }
 
 export interface RawAmisClassDate {
@@ -48,6 +84,7 @@ export interface RawAmisFacultyWrapper {
 export interface RawAmisClass {
   id: number | string;
   course_id: number | string;
+  term_id?: number | string;
   section: string;
   activity: string; // e.g., "LEC", "LAB", "RECIT", or ""
   hide_faculty: boolean;
@@ -63,7 +100,7 @@ export interface RawAmisClass {
 }
 
 export interface RawAmisClassesResponse {
-  classes: RawAmisClass[];
+  classes: RawAmisClass[] | RawLaravelPaginator<RawAmisClass>;
 }
 
 export type AmisEnlistmentStatus = 'Bookmarked' | 'Enlisted' | 'Sent to SAIS' | string;

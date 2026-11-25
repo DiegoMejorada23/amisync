@@ -85,8 +85,45 @@ function indexPlanCatalog(plan: AcademicPlanState): {
   >();
 
   const courseKeyByCourseId = new Map<string, string>();
+  let effectiveTermId: number | null =
+    typeof plan.termId === 'number' && Number.isFinite(plan.termId) ? plan.termId : null;
+  if (effectiveTermId === null) {
+    for (const c of [...plan.preEnlistedCourses, ...plan.intendedCourses]) {
+      if (typeof c.termId === 'number' && Number.isFinite(c.termId)) {
+        effectiveTermId = c.termId;
+        break;
+      }
+      const secTerm = c.sections.find(
+        (opt) => typeof opt.section.termId === 'number' && Number.isFinite(opt.section.termId)
+      )?.section.termId;
+      if (typeof secTerm === 'number') {
+        effectiveTermId = secTerm;
+        break;
+      }
+    }
+  }
+
+  const sectionChainMatchesTerm = (sec: NormalizedSection): boolean => {
+    if (effectiveTermId === null) {
+      return true;
+    }
+    if (typeof sec.termId === 'number' && sec.termId !== effectiveTermId) {
+      return false;
+    }
+    if (sec.parentClass && !sectionChainMatchesTerm(sec.parentClass)) {
+      return false;
+    }
+    return true;
+  };
 
   const registerCourse = (course: CourseEntry, fromPreEnlisted: boolean) => {
+    if (
+      effectiveTermId !== null &&
+      typeof course.termId === 'number' &&
+      course.termId !== effectiveTermId
+    ) {
+      return;
+    }
     const existingKey = !course.canEnrollMultiple
       ? courseKeyByCourseId.get(course.id)
       : undefined;
@@ -160,6 +197,9 @@ function indexPlanCatalog(plan: AcademicPlanState): {
     };
 
     for (const opt of course.sections) {
+      if (!sectionChainMatchesTerm(opt.section)) {
+        continue;
+      }
       registerSection(opt.section, true, coursePre || opt.isPreEnlisted, {
         isHidden: opt.flags.isHidden,
         isLocked: opt.flags.isLocked,

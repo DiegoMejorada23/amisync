@@ -53,6 +53,13 @@ function validateNormalizedSection(
   if (!isNonEmptyString(rawSection.courseId) || !isNonEmptyString(rawSection.section)) {
     throw new AmisError('MALFORMED_RESPONSE', `${path} is missing valid courseId or section.`);
   }
+  if (
+    rawSection.termId !== undefined &&
+    rawSection.termId !== null &&
+    !isFiniteNumber(rawSection.termId)
+  ) {
+    throw new AmisError('MALFORMED_RESPONSE', `${path}.termId must be a finite number or null.`);
+  }
   if (rawSection.activity !== null && typeof rawSection.activity !== 'string') {
     throw new AmisError('MALFORMED_RESPONSE', `${path}.activity must be string or null.`);
   }
@@ -120,6 +127,7 @@ function validateCourseEntryList(entries: unknown, fieldName: string): CourseEnt
       !isNonEmptyString(entry.instanceId) ||
       !isNonEmptyString(entry.id) ||
       !isNonEmptyString(entry.code) ||
+      (entry.termId !== undefined && entry.termId !== null && !isFiniteNumber(entry.termId)) ||
       !isFiniteNumber(entry.units) ||
       entry.units < 0 ||
       typeof entry.canEnrollMultiple !== 'boolean' ||

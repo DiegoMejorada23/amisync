@@ -3,15 +3,19 @@ import { describe, it } from 'node:test';
 
 import { isAmisError } from '../src/amis/errors.ts';
 import { exportPlanSnapshot, parsePlanSnapshot } from '../src/amis/snapshot.ts';
+import { DEFAULT_FALLBACK_TERMS } from '../src/amis/terms.ts';
 import {
   AUTO_REFRESH_INTERVAL_MS,
   canManualRefresh,
   clearAcademicPlan,
   loadAcademicPlan,
+  loadTermCatalog,
   MANUAL_REFRESH_COOLDOWN_MS,
   PLAN_STORAGE_KEY,
   saveAcademicPlan,
+  saveTermCatalog,
   shouldAutoRefresh,
+  TERM_CATALOG_STORAGE_KEY,
   type StorageAreaLike,
 } from '../src/storage/planStorage.ts';
 import { createDefaultAcademicPlanState, PRIORITY_WEIGHT_MAP } from '../src/types/domain.ts';
@@ -135,5 +139,41 @@ describe('chrome.storage.local plan persistence & refresh timers', () => {
 
     const fourHoursAgo = new Date(baseTime.getTime() - AUTO_REFRESH_INTERVAL_MS).toISOString();
     assert.equal(shouldAutoRefresh(fourHoursAgo, baseTime), true);
+  });
+
+  it('persists, loads, and self-heals the discovered term catalog in chrome.storage.local', async () => {
+    const storage = createMemoryStorage();
+    const initial = await loadTermCatalog(storage);
+    assert.deepEqual(
+      initial.map((t) => t.termId),
+      DEFAULT_FALLBACK_TERMS.map((t) => t.termId)
+    );
+
+    await saveTermCatalog(
+      [
+        {
+          termId: 1281,
+          label: '1281 - 1st Sem (2028-2029)',
+          shortLabel: '1st Sem (2028-2029)',
+          isMidyear: false,
+          source: 'api',
+        },
+      ],
+      storage
+    );
+
+    const loaded = await loadTermCatalog(storage);
+    assert.equal(loaded[0].termId, 1281);
+    assert.equal(loaded[0].source, 'api');
+    assert.ok(loaded.some((t) => t.termId === 1261));
+
+    const corruptStorage = createMemoryStorage({
+      [TERM_CATALOG_STORAGE_KEY]: { invalid: true },
+    });
+    const healed = await loadTermCatalog(corruptStorage);
+    assert.deepEqual(
+      healed.map((t) => t.termId),
+      DEFAULT_FALLBACK_TERMS.map((t) => t.termId)
+    );
   });
 });

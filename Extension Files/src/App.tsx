@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fetchActiveTermId,
+  DEFAULT_FALLBACK_TERM_ID,
+  DEFAULT_FALLBACK_TERMS,
+  extractTermsFromActiveAmisTab,
+  fetchActiveTermSchedule,
+  fetchAmisTerms,
   fetchAuthUserId,
   fetchCourseWithClasses,
   fetchStudentEnlistments,
+  formatEmptyTermClassesMessage,
+  formatUplbTermLabel,
   getActiveAmisTab,
   getAuthToken,
   isAmisError,
+  mergeTermOptions,
   searchCoursesByCode,
   subscribeAuthTokenSync,
 } from './amis/index.ts';
@@ -23,7 +30,9 @@ import { TopBar } from './components/TopBar.tsx';
 import {
   canManualRefresh,
   loadAcademicPlan,
+  loadTermCatalog,
   saveAcademicPlan,
+  saveTermCatalog,
   shouldAutoRefresh,
   subscribeAcademicPlanChanges,
 } from './storage/planStorage.ts';
@@ -31,6 +40,7 @@ import type { RawAmisCourse } from './types/amis.ts';
 import {
   createDefaultAcademicPlanState,
   type AcademicPlanState,
+  type AcademicTermOption,
   type StudentPreferences,
   type Weekday,
 } from './types/domain.ts';
@@ -44,6 +54,7 @@ import {
   applyRelaxationActionToPlan,
   reconcileSyncedPlan,
   removeIntendedCourse,
+  switchPlanTerm,
   toggleBlockedCell,
   toggleCourseAccordion,
   toggleSectionFlag,
@@ -81,6 +92,10 @@ export default function App() {
   const [authStatus, setAuthStatus] = useState<AmisConnectionStatus>('checking');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [availableTerms, setAvailableTerms] = useState<AcademicTermOption[]>(() => [
+    ...DEFAULT_FALLBACK_TERMS,
+  ]);
+  const [emptyTermSuggestion, setEmptyTermSuggestion] = useState<AcademicTermOption | null>(null);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isAddingCourse, setIsAddingCourse] = useState(false);
@@ -103,6 +118,14 @@ export default function App() {
   const lastPersistedJsonRef = useRef<string | null>(null);
 
   const isInIframe = typeof window !== 'undefined' && window.parent !== window;
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.documentElement.classList.toggle('amisync-overlay', isInIframe);
+    document.documentElement.classList.toggle('amisync-popup', !isInIframe);
+  }, [isInIframe]);
 
   // Track browser online/offline transitions gracefully.
   useEffect(() => {
@@ -127,12 +150,13 @@ export default function App() {
       return;
     }
 
-    void loadAcademicPlan()
-      .then((loaded) => {
+    void Promise.all([loadAcademicPlan(), loadTermCatalog()])
+      .then(([loaded, cachedTerms]) => {
         if (!cancelled) {
           lastPersistedJsonRef.current = JSON.stringify(loaded);
           planRef.current = loaded;
           setPlan(loaded);
+          setAvailableTerms(cachedTerms);
           setStorageHydrated(true);
         }
       })
@@ -255,11 +279,83 @@ export default function App() {
     };
   }, []);
 
+  const selectedTermId = plan.termId ?? DEFAULT_FALLBACK_TERM_ID;
+
+  const renderedTermOptions = useMemo(() => {
+    const formatted = formatUplbTermLabel(selectedTermId);
+    const activeFallback: AcademicTermOption = {
+      termId: selectedTermId,
+      label: formatted.label,
+      shortLabel: formatted.shortLabel,
+      isMidyear: formatted.isMidyear,
+      source: 'fallback',
+    };
+    return mergeTermOptions(availableTerms, [activeFallback]);
+  }, [availableTerms, selectedTermId]);
+
+  const discoverTerms = useCallback(
+    async (
+      token: string
+    ): Promise<{
+      terms: AcademicTermOption[];
+      recommendedTermId: number | null;
+      domSelectedTermId: number | null;
+    }> => {
+      const [apiTermsRes, domTermsRes, scheduleRes] = await Promise.allSettled([
+        fetchAmisTerms(token),
+        hasChromeTabsApi()
+          ? extractTermsFromActiveAmisTab()
+          : Promise.resolve({ terms: [] as AcademicTermOption[], selectedTermId: null }),
+        fetchActiveTermSchedule(token),
+      ]);
+
+      for (const settled of [apiTermsRes, scheduleRes]) {
+        if (
+          settled.status === 'rejected' &&
+          isAmisError(settled.reason) &&
+          (settled.reason.code === 'SESSION_EXPIRED' ||
+            settled.reason.code === 'UNAUTHENTICATED')
+        ) {
+          throw settled.reason;
+        }
+      }
+
+      const apiTerms = apiTermsRes.status === 'fulfilled' ? apiTermsRes.value : [];
+      const domTerms = domTermsRes.status === 'fulfilled' ? domTermsRes.value.terms : [];
+      const domSelectedTermId =
+        domTermsRes.status === 'fulfilled' ? domTermsRes.value.selectedTermId : null;
+      const scheduleTerms = scheduleRes.status === 'fulfilled' ? scheduleRes.value.terms : [];
+      const recommendedTermId =
+        scheduleRes.status === 'fulfilled' ? scheduleRes.value.recommendedTermId : null;
+
+      const merged = mergeTermOptions(
+        apiTerms,
+        domTerms,
+        scheduleTerms,
+        availableTerms,
+        DEFAULT_FALLBACK_TERMS
+      );
+
+      setAvailableTerms(merged);
+      if (hasChromeStorageApi()) {
+        void saveTermCatalog(merged).catch(() => {});
+      }
+
+      return { terms: merged, recommendedTermId, domSelectedTermId };
+    },
+    [availableTerms]
+  );
+
   // 4. Live AMIS Sync (term metadata, pre-enlisted courses, and refreshing intended courses).
   const syncFromAmis = useCallback(
-    async (options?: { force?: boolean; tokenOverride?: string | null }) => {
+    async (options?: {
+      force?: boolean;
+      tokenOverride?: string | null;
+      termIdOverride?: number | null;
+    }) => {
       if (isSyncing) return;
       setSearchError(null);
+      setEmptyTermSuggestion(null);
       setStatusMessage(null);
 
       if (isOffline) {
@@ -306,7 +402,14 @@ export default function App() {
 
       setIsSyncing(true);
       try {
-        const termId = await fetchActiveTermId(activeToken);
+        const discovered = await discoverTerms(activeToken);
+        const termId =
+          options?.termIdOverride ??
+          planRef.current.termId ??
+          discovered.domSelectedTermId ??
+          discovered.recommendedTermId ??
+          DEFAULT_FALLBACK_TERM_ID;
+
         const userId = await fetchAuthUserId(activeToken);
         const { preEnlistedCourses } = await fetchStudentEnlistments(
           activeToken,
@@ -369,7 +472,10 @@ export default function App() {
         commitPlan(() => updatedPlan);
         setAuthStatus('connected');
 
-        const baseMsg = `Synced term ${termId} (${preEnlistedCourses.length} pre-enlisted course${
+        const syncedTermLabel =
+          discovered.terms.find((t) => t.termId === termId)?.label ??
+          formatUplbTermLabel(termId).label;
+        const baseMsg = `Synced ${syncedTermLabel} (${preEnlistedCourses.length} pre-enlisted course${
           preEnlistedCourses.length === 1 ? '' : 's'
         }).`;
         const extraNotes: string[] = [];
@@ -398,7 +504,30 @@ export default function App() {
         setIsSyncing(false);
       }
     },
-    [authToken, authStatus, commitPlan, isOffline, isSyncing]
+    [authToken, authStatus, commitPlan, discoverTerms, isOffline, isSyncing]
+  );
+
+  const handleSelectTerm = useCallback(
+    (nextTermId: number) => {
+      if (!Number.isInteger(nextTermId) || nextTermId <= 0) {
+        return;
+      }
+      setSearchError(null);
+      setEmptyTermSuggestion(null);
+      setStatusMessage(null);
+      commitPlan((prev) => switchPlanTerm(prev, nextTermId));
+
+      const termLabel =
+        renderedTermOptions.find((t) => t.termId === nextTermId)?.label ??
+        formatUplbTermLabel(nextTermId).label;
+
+      if (authToken && !isOffline && authStatus === 'connected') {
+        void syncFromAmis({ force: true, termIdOverride: nextTermId });
+      } else {
+        setStatusMessage(`Selected ${termLabel}.`);
+      }
+    },
+    [authStatus, authToken, commitPlan, isOffline, renderedTermOptions, syncFromAmis]
   );
 
   // Auto-sync once when storage is hydrated and a live AMIS auth token becomes available.
@@ -492,6 +621,7 @@ export default function App() {
   const handleAddCourseByCode = useCallback(
     async (courseCode: string): Promise<boolean> => {
       setSearchError(null);
+      setEmptyTermSuggestion(null);
       setStatusMessage(null);
 
       if (isOffline) {
@@ -507,12 +637,8 @@ export default function App() {
       }
 
       setIsAddingCourse(true);
+      const termId = planRef.current.termId ?? selectedTermId;
       try {
-        let termId = planRef.current.termId;
-        if (termId === null) {
-          termId = await fetchActiveTermId(authToken);
-        }
-
         const fetchedCourse = await fetchCourseWithClasses(authToken, termId, courseCode);
         commitPlan((prev) => ({
           ...addOrUpdateIntendedCourse(prev, fetchedCourse),
@@ -527,13 +653,23 @@ export default function App() {
           setAuthStatus('unauthenticated');
           setAuthToken(null);
         }
+        if (isAmisError(err) && err.code === 'NO_CLASSES_FOUND') {
+          const emptyFeedback = formatEmptyTermClassesMessage(
+            courseCode.trim(),
+            termId,
+            renderedTermOptions
+          );
+          setSearchError(emptyFeedback.message);
+          setEmptyTermSuggestion(emptyFeedback.suggestedTerm);
+          return false;
+        }
         setSearchError(formatAmisErrorMessage(err));
         return false;
       } finally {
         setIsAddingCourse(false);
       }
     },
-    [authToken, commitPlan, isOffline]
+    [authToken, commitPlan, isOffline, renderedTermOptions, selectedTermId]
   );
 
   // 7. Interactive Timetable, Course Flags, Preferences, and HITL Relaxations.
@@ -644,7 +780,7 @@ export default function App() {
   const hardClashCount = diagnosis ? diagnosis.hardClashCount : 0;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isInIframe ? 'app-shell--overlay' : 'app-shell--popup'}`}>
       <TopBar
         canExpandOverlay={!isInIframe && authStatus !== 'not_on_amis' && hasChromeTabsApi()}
         onExpandOverlay={handleExpandOverlay}
@@ -714,6 +850,9 @@ export default function App() {
               <CoursesTab
                 intendedCourses={plan.intendedCourses}
                 preEnlistedCourses={plan.preEnlistedCourses}
+                selectedTermId={selectedTermId}
+                availableTerms={renderedTermOptions}
+                emptyTermSuggestion={emptyTermSuggestion}
                 authStatus={authStatus}
                 isOffline={isOffline}
                 statusMessage={statusMessage}
@@ -723,6 +862,7 @@ export default function App() {
                 isSolving={isSolving}
                 isSolveBlocked={isSolveBlocked}
                 canGenerate={hasAnyCourse}
+                onSelectTerm={handleSelectTerm}
                 onSyncAmis={() => void syncFromAmis({ force: false })}
                 onSearchSuggestions={handleSearchSuggestions}
                 onAddCourseByCode={handleAddCourseByCode}

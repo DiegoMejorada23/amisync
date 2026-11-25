@@ -142,12 +142,31 @@ function parseFaculties(rawClass: Record<string, unknown>): FacultyName[] {
   return result;
 }
 
+function parseOptionalTermId(value: unknown): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 /**
  * Parses a raw AMIS course object into a normalized `CourseEntry` shell.
  */
 export function parseRawCourse(
   raw: unknown,
-  options?: { isPreEnlisted?: boolean; instanceId?: string; isExpanded?: boolean }
+  options?: { isPreEnlisted?: boolean; instanceId?: string; isExpanded?: boolean; termId?: number | null }
 ): CourseEntry {
   if (!isRecord(raw)) {
     throw new AmisError('MALFORMED_RESPONSE', 'Raw course payload must be an object.');
@@ -173,10 +192,13 @@ export function parseRawCourse(
     );
   }
 
+  const resolvedTermId = parseOptionalTermId(options?.termId);
+
   return {
     instanceId: options?.instanceId ?? crypto.randomUUID(),
     id: String(raw.course_id),
     code: raw.course_code.trim(),
+    ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
     units,
     canEnrollMultiple: Boolean(raw.is_multiple_enrollment),
     isPreEnlisted: Boolean(options?.isPreEnlisted),
@@ -192,7 +214,8 @@ export function parseRawCourse(
  */
 export function parseRawClass(
   raw: unknown,
-  visitedIds: Set<string> = new Set<string>()
+  visitedIds: Set<string> = new Set<string>(),
+  options?: { termId?: number | null }
 ): NormalizedSection {
   if (!isRecord(raw)) {
     throw new AmisError('MALFORMED_RESPONSE', 'Raw class payload must be an object.');
@@ -237,9 +260,16 @@ export function parseRawClass(
       ? raw.facility_id.trim()
       : null;
 
+  const resolvedTermId =
+    parseOptionalTermId(options?.termId) ?? parseOptionalTermId(raw.term_id);
+
   const parentClass =
     raw.parent !== null && raw.parent !== undefined
-      ? parseRawClass(raw.parent, nextVisited)
+      ? parseRawClass(
+          raw.parent,
+          nextVisited,
+          resolvedTermId !== undefined ? { termId: resolvedTermId } : undefined
+        )
       : null;
 
   const parentClassId = parentClass
@@ -251,6 +281,7 @@ export function parseRawClass(
   return {
     id,
     courseId: String(raw.course_id),
+    ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
     section: raw.section.trim(),
     activity,
     faculties: parseFaculties(raw),
@@ -357,7 +388,7 @@ export function deriveRequiredComponents(sections: NormalizedSection[]): Compone
 export function buildCourseEntryFromRaw(
   rawCourse: RawAmisCourse,
   rawClasses: RawAmisClass[],
-  options?: { isPreEnlisted?: boolean; instanceId?: string; isExpanded?: boolean }
+  options?: { isPreEnlisted?: boolean; instanceId?: string; isExpanded?: boolean; termId?: number | null }
 ): CourseEntry {
   if (!Array.isArray(rawClasses)) {
     throw new AmisError('MALFORMED_RESPONSE', 'Expected classes to be an array.');
@@ -365,9 +396,16 @@ export function buildCourseEntryFromRaw(
 
   const isPreEnlisted = Boolean(options?.isPreEnlisted);
   const course = parseRawCourse(rawCourse, options);
+  const resolvedTermId = parseOptionalTermId(options?.termId) ?? course.termId;
 
   const normalizedSections = rawClasses
-    .map((rawClass) => parseRawClass(rawClass))
+    .map((rawClass) =>
+      parseRawClass(
+        rawClass,
+        new Set<string>(),
+        resolvedTermId !== undefined ? { termId: resolvedTermId } : undefined
+      )
+    )
     .sort(compareSectionsCanonical);
 
   const sectionOptions: CourseSectionOption[] = normalizedSections.map((section) => ({
