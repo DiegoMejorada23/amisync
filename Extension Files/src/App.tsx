@@ -51,6 +51,7 @@ import type {
 } from './types/solver.ts';
 import {
   addOrUpdateIntendedCourse,
+  applyBlockedCellsRange,
   applyRelaxationActionToPlan,
   reconcileSyncedPlan,
   removeIntendedCourse,
@@ -61,7 +62,7 @@ import {
   updatePreferences,
   type SyncedCourseRefreshOutcome,
 } from './ui/planActions.ts';
-import { computePlanUnits } from './ui/scheduleView.ts';
+import { computePlanUnits, type BlockedCellCoordinate } from './ui/scheduleView.ts';
 import { isSolverCancelledError, SolverWorkerClient } from './ui/workerClient.ts';
 
 type RightTab = 'courses' | 'preferences';
@@ -194,6 +195,9 @@ export default function App() {
       options?: { resetInfeasibleBlock?: boolean; preserveSchedule?: boolean }
     ): AcademicPlanState => {
       const next = updater(planRef.current);
+      if (next === planRef.current) {
+        return next;
+      }
       planRef.current = next;
       setPlan(next);
 
@@ -675,9 +679,22 @@ export default function App() {
   // 7. Interactive Timetable, Course Flags, Preferences, and HITL Relaxations.
   const handleToggleCell = useCallback(
     (day: Weekday, startMinutes: number) => {
+      if (activeTab !== 'preferences') {
+        return;
+      }
       commitPlan((prev) => toggleBlockedCell(prev, day, startMinutes));
     },
-    [commitPlan]
+    [activeTab, commitPlan]
+  );
+
+  const handleCommitBlockedRange = useCallback(
+    (cells: readonly BlockedCellCoordinate[], action: 'block' | 'unblock') => {
+      if (activeTab !== 'preferences') {
+        return;
+      }
+      commitPlan((prev) => applyBlockedCellsRange(prev, cells, action));
+    },
+    [activeTab, commitPlan]
   );
 
   const handleToggleAccordion = useCallback(
@@ -802,7 +819,9 @@ export default function App() {
             plan={plan}
             activeAlternative={activeAlternative}
             isSolving={isSolving}
+            isBlockingEnabled={activeTab === 'preferences'}
             onToggleCell={handleToggleCell}
+            onCommitBlockedRange={handleCommitBlockedRange}
           />
 
           <ScheduleConflictsPanel

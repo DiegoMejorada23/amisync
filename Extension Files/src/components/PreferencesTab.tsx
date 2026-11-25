@@ -53,8 +53,8 @@ export function PreferencesTab({
         <div className="pref-callout">
           <h3 className="pref-callout__title">Optimizer Constraint Rules</h3>
           <p className="pref-callout__copy">
-            Click timetable slots on the left to mark unworkable hours. Set your pacing preferences
-            below to bias schedule generation.
+            Click or drag timetable slots on the left to mark unworkable hours. Set your pacing
+            preferences below to bias schedule generation.
           </p>
         </div>
 

@@ -8,7 +8,10 @@ import {
   type Weekday,
 } from '../types/domain.ts';
 import type { RelaxationAction } from '../types/solver.ts';
-import { isCellLockedByPreEnlisted } from './scheduleView.ts';
+import {
+  isCellLockedByPreEnlisted,
+  type BlockedCellCoordinate,
+} from './scheduleView.ts';
 
 function sortBlockedCells(cells: readonly BlockedTimeCell[]): BlockedTimeCell[] {
   return [...cells].sort((a, b) => {
@@ -50,6 +53,73 @@ export function toggleBlockedCell(
         { id: cellId, day, startMinutes, endMinutes },
       ]);
 
+  return {
+    ...plan,
+    blockedCells: nextBlockedCells,
+  };
+}
+
+/**
+ * Applies a batch `'block'` or `'unblock'` action across a set of timetable cells
+ * (e.g. a click-and-drag rectangular selection), skipping locked pre-enlisted cells.
+ * Returns the exact same `plan` reference when no cells changed so callers can skip storage writes.
+ */
+export function applyBlockedCellsRange(
+  plan: AcademicPlanState,
+  cells: readonly BlockedCellCoordinate[],
+  action: 'block' | 'unblock'
+): AcademicPlanState {
+  if (cells.length === 0) {
+    return plan;
+  }
+
+  const targetCells: BlockedTimeCell[] = [];
+  const targetKeys = new Set<string>();
+
+  for (const cell of cells) {
+    const endMinutes = cell.startMinutes + 60;
+    if (isCellLockedByPreEnlisted(plan, cell.day, cell.startMinutes, endMinutes)) {
+      continue;
+    }
+    const cellId = `${cell.day}:${cell.startMinutes}-${endMinutes}`;
+    if (targetKeys.has(cellId)) {
+      continue;
+    }
+    targetKeys.add(cellId);
+    targetCells.push({
+      id: cellId,
+      day: cell.day,
+      startMinutes: cell.startMinutes,
+      endMinutes,
+    });
+  }
+
+  if (targetCells.length === 0) {
+    return plan;
+  }
+
+  if (action === 'block') {
+    const existingKeys = new Set(
+      plan.blockedCells.map((c) => `${c.day}:${c.startMinutes}-${c.endMinutes}`)
+    );
+    const additions = targetCells.filter((cell) => !existingKeys.has(cell.id));
+    if (additions.length === 0) {
+      return plan;
+    }
+    return {
+      ...plan,
+      blockedCells: sortBlockedCells([...plan.blockedCells, ...additions]),
+    };
+  }
+
+  const nextBlockedCells = plan.blockedCells.filter(
+    (c) =>
+      !targetKeys.has(c.id) &&
+      !targetKeys.has(`${c.day}:${c.startMinutes}-${c.endMinutes}`)
+  );
+  if (nextBlockedCells.length === plan.blockedCells.length) {
+    return plan;
+  }
   return {
     ...plan,
     blockedCells: nextBlockedCells,

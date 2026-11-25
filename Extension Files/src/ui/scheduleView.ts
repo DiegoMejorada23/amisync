@@ -421,3 +421,59 @@ export function parseConflictBullet(
 
   return { prefix, segments };
 }
+
+export interface BlockedCellCoordinate {
+  day: Weekday;
+  startMinutes: number;
+}
+
+/**
+ * Returns true if any persisted `blockedCells` interval intersects `[startMinutes, endMinutes)` on `day`.
+ */
+export function isSlotBlocked(
+  plan: AcademicPlanState,
+  day: Weekday,
+  startMinutes: number,
+  endMinutes: number
+): boolean {
+  return plan.blockedCells.some(
+    (cell) =>
+      cell.day === day &&
+      cell.startMinutes < endMinutes &&
+      startMinutes < cell.endMinutes
+  );
+}
+
+/**
+ * Computes all timetable grid cell coordinates inside the inclusive rectangle bounded by
+ * `start` and `end` (covering single clicks, single-day vertical drags, and multi-day rectangular drags).
+ */
+export function getTimetableCellRange(
+  start: BlockedCellCoordinate,
+  end: BlockedCellCoordinate
+): BlockedCellCoordinate[] {
+  const startDayIdx = GRID_DAYS.indexOf(start.day);
+  const endDayIdx = GRID_DAYS.indexOf(end.day);
+  const startHourIdx = GRID_HOURS.findIndex((h) => h.startMinutes === start.startMinutes);
+  const endHourIdx = GRID_HOURS.findIndex((h) => h.startMinutes === end.startMinutes);
+
+  if (startDayIdx === -1 || endDayIdx === -1 || startHourIdx === -1 || endHourIdx === -1) {
+    return [];
+  }
+
+  const minDay = Math.min(startDayIdx, endDayIdx);
+  const maxDay = Math.max(startDayIdx, endDayIdx);
+  const minHour = Math.min(startHourIdx, endHourIdx);
+  const maxHour = Math.max(startHourIdx, endHourIdx);
+
+  const range: BlockedCellCoordinate[] = [];
+  for (let d = minDay; d <= maxDay; d += 1) {
+    for (let h = minHour; h <= maxHour; h += 1) {
+      range.push({
+        day: GRID_DAYS[d],
+        startMinutes: GRID_HOURS[h].startMinutes,
+      });
+    }
+  }
+  return range;
+}

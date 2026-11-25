@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AcademicPlanState, Weekday } from '../types/domain.ts';
 import type { GeneratedScheduleAlternative } from '../types/solver.ts';
 import {
@@ -6,22 +7,75 @@ import {
   GRID_DAYS,
   GRID_HOURS,
   isCellLockedByPreEnlisted,
+  isSlotBlocked,
+  type BlockedCellCoordinate,
   type TimetableBlock,
 } from '../ui/scheduleView.ts';
+import {
+  getDragPreviewCellKeys,
+  TimetableDragController,
+  type DragBlockMode,
+  type GlobalEventTargetLike,
+  type TimetableDragSession,
+} from '../ui/timetableDrag.ts';
 
 interface TimetableGridProps {
   plan: AcademicPlanState;
   activeAlternative: GeneratedScheduleAlternative | null;
   isSolving: boolean;
+  isBlockingEnabled: boolean;
   onToggleCell: (day: Weekday, startMinutes: number) => void;
+  onCommitBlockedRange: (
+    cells: readonly BlockedCellCoordinate[],
+    action: DragBlockMode
+  ) => void;
 }
 
 export function TimetableGrid({
   plan,
   activeAlternative,
   isSolving,
+  isBlockingEnabled,
   onToggleCell,
+  onCommitBlockedRange,
 }: TimetableGridProps) {
+  const [dragSession, setDragSession] = useState<TimetableDragSession | null>(null);
+
+  const controllerRef = useRef<TimetableDragController | null>(null);
+  if (!controllerRef.current) {
+    controllerRef.current = new TimetableDragController({
+      isBlockingEnabled,
+      onSessionChange: setDragSession,
+      onCommitRange: onCommitBlockedRange,
+      onToggleCell,
+    });
+  }
+
+  controllerRef.current.updateOptions({
+    isBlockingEnabled,
+    onSessionChange: setDragSession,
+    onCommitRange: onCommitBlockedRange,
+    onToggleCell,
+  });
+
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller) {
+      return;
+    }
+    const targets: GlobalEventTargetLike[] = [];
+    if (typeof document !== 'undefined') {
+      targets.push(document);
+    }
+    if (typeof window !== 'undefined') {
+      targets.push(window);
+    }
+    if (targets.length === 0) {
+      return;
+    }
+    return controller.attachGlobalListeners(targets);
+  }, []);
+
   const blocks = buildTimetableBlocks(plan, activeAlternative);
 
   const blocksByDay = new Map<Weekday, TimetableBlock[]>();
@@ -32,17 +86,22 @@ export function TimetableGrid({
     blocksByDay.get(block.day)?.push(block);
   }
 
-  const isCellBlocked = (day: Weekday, startMinutes: number, endMinutes: number): boolean =>
-    plan.blockedCells.some(
-      (cell) =>
-        cell.day === day &&
-        cell.startMinutes < endMinutes &&
-        startMinutes < cell.endMinutes
-    );
+  const previewCellKeys = useMemo(
+    () => (isBlockingEnabled ? getDragPreviewCellKeys(plan, dragSession) : new Set<string>()),
+    [dragSession, isBlockingEnabled, plan]
+  );
+
+  const isDragging = isBlockingEnabled && dragSession !== null;
 
   return (
     <div className="timetable-wrapper" aria-busy={isSolving}>
-      <div className="timetable-grid" role="grid" aria-label="Weekly schedule timetable">
+      <div
+        className={`timetable-grid ${isBlockingEnabled ? 'timetable-grid--editable' : 'timetable-grid--readonly'} ${
+          isDragging ? 'timetable-grid--dragging' : ''
+        }`}
+        role="grid"
+        aria-label="Weekly schedule timetable"
+      >
         {/* Header Row */}
         <div className="timetable-header timetable-header--time" role="columnheader">
           TIME
@@ -67,33 +126,75 @@ export function TimetableGrid({
           return (
             <div key={day} className="timetable-day-col">
               {GRID_HOURS.map((hour) => {
-                const blocked = isCellBlocked(day, hour.startMinutes, hour.endMinutes);
+                const blocked = isSlotBlocked(plan, day, hour.startMinutes, hour.endMinutes);
                 const locked = isCellLockedByPreEnlisted(
                   plan,
                   day,
                   hour.startMinutes,
                   hour.endMinutes
                 );
+                const inPreview =
+                  !locked &&
+                  isBlockingEnabled &&
+                  previewCellKeys.has(`${day}:${hour.startMinutes}`);
+                const effectiveBlocked =
+                  inPreview && dragSession ? dragSession.mode === 'block' : blocked;
+                const slotDisabled = locked || !isBlockingEnabled;
+
+                const ariaLabel = locked
+                  ? `${day} ${hour.label}: Locked pre-enlisted class`
+                  : !isBlockingEnabled
+                    ? effectiveBlocked
+                      ? `${day} ${hour.label}: Blocked.`
+                      : `${day} ${hour.label}: Available.`
+                    : effectiveBlocked
+                      ? `${day} ${hour.label}: Blocked. Click or drag to unblock.`
+                      : `${day} ${hour.label}: Available. Click or drag to block.`;
 
                 return (
                   <button
                     key={`${day}-${hour.startMinutes}`}
                     type="button"
-                    className={`timetable-slot ${blocked ? 'timetable-slot--blocked' : ''} ${
-                      locked ? 'timetable-slot--locked-underlay' : ''
-                    }`}
-                    disabled={locked}
-                    aria-pressed={blocked}
-                    aria-label={
-                      locked
-                        ? `${day} ${hour.label}: Locked pre-enlisted class`
-                        : blocked
-                          ? `${day} ${hour.label}: Blocked. Click to unblock.`
-                          : `${day} ${hour.label}: Available. Click to block.`
-                    }
-                    onClick={() => onToggleCell(day, hour.startMinutes)}
+                    className={`timetable-slot ${
+                      effectiveBlocked ? 'timetable-slot--blocked' : ''
+                    } ${locked ? 'timetable-slot--locked-underlay' : ''} ${
+                      !isBlockingEnabled ? 'timetable-slot--readonly' : ''
+                    } ${inPreview ? 'timetable-slot--drag-target' : ''}`}
+                    disabled={slotDisabled}
+                    aria-pressed={effectiveBlocked}
+                    aria-label={ariaLabel}
+                    onPointerDown={(e) => {
+                      if (!isBlockingEnabled || locked) {
+                        return;
+                      }
+                      if (e.button !== undefined && e.button !== 0) {
+                        return;
+                      }
+                      e.preventDefault();
+                      controllerRef.current?.handlePointerDown({
+                        day,
+                        startMinutes: hour.startMinutes,
+                        isLocked: locked,
+                        isBlocked: blocked,
+                        pointerId: e.pointerId,
+                        button: e.button,
+                      });
+                    }}
+                    onPointerEnter={() => {
+                      controllerRef.current?.handlePointerEnter({
+                        day,
+                        startMinutes: hour.startMinutes,
+                      });
+                    }}
+                    onClick={() => {
+                      controllerRef.current?.handleClick({
+                        day,
+                        startMinutes: hour.startMinutes,
+                        isLocked: locked,
+                      });
+                    }}
                   >
-                    {blocked && <span className="timetable-blocked-badge">BLOCKED</span>}
+                    {effectiveBlocked && <span className="timetable-blocked-badge">BLOCKED</span>}
                   </button>
                 );
               })}
