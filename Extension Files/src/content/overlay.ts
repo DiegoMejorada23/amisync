@@ -26,7 +26,7 @@
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '20px',
+      padding: '16px',
       boxSizing: 'border-box',
     });
 
@@ -34,8 +34,10 @@
     iframe.src = chrome.runtime.getURL('index.html');
     iframe.title = 'AMISync Schedule Optimizer';
     Object.assign(iframe.style, {
-      width: 'min(1280px, 100%)',
-      height: 'min(860px, 100%)',
+      width: '94vw',
+      maxWidth: '1360px',
+      height: '90vh',
+      maxHeight: '860px',
       border: 'none',
       borderRadius: '10px',
       boxShadow: '0 24px 48px rgba(15, 23, 42, 0.35)',

@@ -19,6 +19,15 @@ export const GRID_DAY_HEADERS: Record<Weekday, string> = {
   Saturday: 'SATURDAY',
 };
 
+export const GRID_DAY_HEADERS_SHORT: Record<Weekday, string> = {
+  Monday: 'MON',
+  Tuesday: 'TUE',
+  Wednesday: 'WED',
+  Thursday: 'THU',
+  Friday: 'FRI',
+  Saturday: 'SAT',
+};
+
 export interface GridHourRow {
   startMinutes: number;
   endMinutes: number;

@@ -241,6 +241,7 @@ describe('Timetable Slot Blocking: Tab Gating & Click-and-Drag Range Selection',
         activeAlternative: null;
         isSolving: boolean;
         isBlockingEnabled: boolean;
+        useCompactDayHeaders?: boolean;
         onToggleCell: () => void;
         onCommitBlockedRange: () => void;
       }>;
@@ -293,20 +294,27 @@ describe('Timetable Slot Blocking: Tab Gating & Click-and-Drag Range Selection',
     // Pre-enlisted CMSC 165 occupies Tue 7-8 (1), Thu 7-8 (1), Fri 7-10 (3) = 5 locked slots
     assert.equal(disabledCountPrefs, 5, 'Only the 5 pre-enlisted slots should remain disabled');
 
-    // 3. Default App shell starts on Courses tab with timetable blocking disabled.
+    // 3. Default App shell starts on Courses tab with timetable blocking disabled and popup compact headers.
     const { default: App } = await loadTsxComponent<{ default: React.ComponentType }>(
       'src/App.tsx'
     );
     const appHtml = renderToStaticMarkup(React.createElement(App));
     assert.ok(appHtml.includes('aria-selected="true" class="right-tabs__btn right-tabs__btn--active">Courses</button>'));
     assert.ok(appHtml.includes('timetable-grid--readonly'));
+    assert.ok(appHtml.includes('>MON</div>'));
+    assert.ok(appHtml.includes('>SAT</div>'));
+    assert.ok(!appHtml.includes('>MONDAY</div>'));
+    assert.ok(coursesHtml.includes('>MONDAY</div>'));
+    assert.ok(coursesHtml.includes('>SATURDAY</div>'));
 
-    // 4. CSS scopes clickable cursor & hover affordances strictly to editable mode.
+    // 4. CSS scopes clickable cursor & hover affordances strictly to editable mode,
+    // enforces full 800x600 popup dimensions, and gives Schedule Conflicts permanent vertical space.
     const css = fs.readFileSync(path.join(EXT_ROOT, 'src/styles/index.css'), 'utf8');
     assert.match(css, /\.timetable-slot\s*\{[\s\S]*?cursor:\s*default;/);
     assert.match(css, /\.timetable-grid--editable\s+\.timetable-slot:not\(:disabled\)\s*\{[\s\S]*?cursor:\s*pointer;/);
     assert.match(css, /\.timetable-grid--editable\s+\.timetable-slot:hover:not\(:disabled\)/);
     assert.match(css, /\.timetable-grid--dragging\s+\.timetable-block\s*\{[\s\S]*?pointer-events:\s*none;/);
+    assert.match(css, /html\.amisync-popup[\s\S]*?width:\s*800px;[\s\S]*?height:\s*600px;[\s\S]*?overflow:\s*hidden;/);
   });
 
   it('blocks dragging and clicking when Courses tab is active', () => {

@@ -4,6 +4,7 @@ import type { GeneratedScheduleAlternative } from '../types/solver.ts';
 import {
   buildTimetableBlocks,
   GRID_DAY_HEADERS,
+  GRID_DAY_HEADERS_SHORT,
   GRID_DAYS,
   GRID_HOURS,
   isCellLockedByPreEnlisted,
@@ -24,6 +25,7 @@ interface TimetableGridProps {
   activeAlternative: GeneratedScheduleAlternative | null;
   isSolving: boolean;
   isBlockingEnabled: boolean;
+  useCompactDayHeaders?: boolean;
   onToggleCell: (day: Weekday, startMinutes: number) => void;
   onCommitBlockedRange: (
     cells: readonly BlockedCellCoordinate[],
@@ -36,6 +38,7 @@ export function TimetableGrid({
   activeAlternative,
   isSolving,
   isBlockingEnabled,
+  useCompactDayHeaders = false,
   onToggleCell,
   onCommitBlockedRange,
 }: TimetableGridProps) {
@@ -93,6 +96,8 @@ export function TimetableGrid({
 
   const isDragging = isBlockingEnabled && dragSession !== null;
 
+  const dayHeaders = useCompactDayHeaders ? GRID_DAY_HEADERS_SHORT : GRID_DAY_HEADERS;
+
   return (
     <div className="timetable-wrapper" aria-busy={isSolving}>
       <div
@@ -108,7 +113,7 @@ export function TimetableGrid({
         </div>
         {GRID_DAYS.map((day) => (
           <div key={day} className="timetable-header" role="columnheader">
-            {GRID_DAY_HEADERS[day]}
+            {dayHeaders[day]}
           </div>
         ))}
 

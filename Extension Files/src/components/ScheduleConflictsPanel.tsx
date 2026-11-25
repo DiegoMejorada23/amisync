@@ -30,8 +30,15 @@ export function ScheduleConflictsPanel({
     (diagnosis?.fallbackOptions ?? []).map((opt) => opt.relaxation.id)
   );
 
+  const isExpanded = diagnosis !== null;
+
   return (
-    <section className="conflicts-panel" aria-label="Schedule Conflicts">
+    <section
+      className={`conflicts-panel ${
+        isExpanded ? 'conflicts-panel--expanded' : 'conflicts-panel--compact'
+      }`}
+      aria-label="Schedule Conflicts"
+    >
       <div className="conflicts-panel__header">
         <span className="conflicts-panel__title">SCHEDULE CONFLICTS</span>
         {isSolving ? (
@@ -40,7 +47,11 @@ export function ScheduleConflictsPanel({
           </span>
         ) : diagnosis ? (
           <span className="conflicts-panel__badge">INFEASIBLE</span>
-        ) : null}
+        ) : (
+          <span className="conflicts-panel__badge conflicts-panel__badge--clear">
+            0 HARD CLASHES
+          </span>
+        )}
       </div>
 
       <div className="conflicts-panel__body">
@@ -102,7 +113,13 @@ export function ScheduleConflictsPanel({
               </div>
             )}
           </div>
-        ) : null}
+        ) : (
+          <p className="conflicts-empty-summary">
+            {isSolving
+              ? 'Checking hard constraints and optimizing feasible schedules in WebAssembly...'
+              : 'No active schedule conflicts. QuickXplain diagnostics and 1-click fixes appear here if infeasible.'}
+          </p>
+        )}
       </div>
     </section>
   );

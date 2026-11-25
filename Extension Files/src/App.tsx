@@ -827,6 +827,7 @@ export default function App() {
             activeAlternative={activeAlternative}
             isSolving={isSolving}
             isBlockingEnabled={activeTab === 'preferences'}
+            useCompactDayHeaders={!isInIframe}
             onToggleCell={handleToggleCell}
             onCommitBlockedRange={handleCommitBlockedRange}
           />
