@@ -50,9 +50,10 @@ import type {
   RelaxationAction,
 } from './types/solver.ts';
 import {
-  addOrUpdateIntendedCourse,
+  addSearchedIntendedCourse,
   applyBlockedCellsRange,
   applyRelaxationActionToPlan,
+  formatSearchAddStatusMessage,
   reconcileSyncedPlan,
   removeIntendedCourse,
   switchPlanTerm,
@@ -644,10 +645,16 @@ export default function App() {
       const termId = planRef.current.termId ?? selectedTermId;
       try {
         const fetchedCourse = await fetchCourseWithClasses(authToken, termId, courseCode);
-        commitPlan((prev) => ({
-          ...addOrUpdateIntendedCourse(prev, fetchedCourse),
-          termId,
-        }));
+        const searchResult = addSearchedIntendedCourse(planRef.current, fetchedCourse);
+        commitPlan(() =>
+          searchResult.plan.termId === termId
+            ? searchResult.plan
+            : { ...searchResult.plan, termId }
+        );
+        const infoMessage = formatSearchAddStatusMessage(searchResult);
+        if (infoMessage) {
+          setStatusMessage(infoMessage);
+        }
         return true;
       } catch (err) {
         if (isAmisError(err) && err.code === 'SESSION_EXPIRED') {

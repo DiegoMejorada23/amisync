@@ -3,6 +3,7 @@ import { shortenTermSemesterText } from '../amis/index.ts';
 import { checkExhaustedCapacity } from '../amis/parser.ts';
 import type { RawAmisCourse } from '../types/amis.ts';
 import type { AcademicTermOption, CourseEntry } from '../types/domain.ts';
+import { normalizeCourseCode } from '../ui/planActions.ts';
 import {
   formatSectionScheduleLines,
   getCapacityBadgeTone,
@@ -102,7 +103,7 @@ export function CoursesTab({
           if (cancelled) return;
           const uniqueByCode = new Map<string, RawAmisCourse>();
           for (const course of courses) {
-            const key = course.course_code.trim().toUpperCase();
+            const key = normalizeCourseCode(course.course_code);
             if (!uniqueByCode.has(key)) {
               uniqueByCode.set(key, course);
             }

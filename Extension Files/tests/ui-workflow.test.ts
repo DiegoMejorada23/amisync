@@ -9,7 +9,10 @@ import {
 } from '../src/types/domain.ts';
 import {
   addOrUpdateIntendedCourse,
+  addSearchedIntendedCourse,
   applyRelaxationActionToPlan,
+  formatSearchAddStatusMessage,
+  normalizeCourseCode,
   removeIntendedCourse,
   switchPlanTerm,
   toggleBlockedCell,
@@ -547,6 +550,179 @@ describe('Milestone 5 UI View Models, Reducers & End-to-End HITL Workflow', () =
     assert.deepEqual(
       switched.intendedCourses.map((c) => c.code),
       ['STAT 1']
+    );
+  });
+
+  it('deduplicates duplicate course searches case-insensitively, unhides hidden sections while preserving locks/stars, and expands accordion', () => {
+    assert.equal(normalizeCourseCode('  cmsc   191 '), 'CMSC 191');
+
+    let plan = createDefaultAcademicPlanState();
+    plan.termId = 1261;
+    plan.preEnlistedCourses = [
+      {
+        ...makeRawPreEnlistedCourse(),
+        termId: 1261,
+      },
+    ];
+
+    const cmsc191Initial: CourseEntry = {
+      instanceId: 'inst-191-orig',
+      id: '191',
+      code: 'CMSC 191',
+      termId: 1261,
+      units: 3,
+      canEnrollMultiple: true,
+      isPreEnlisted: false,
+      requiredComponents: ['LEC'],
+      isExpanded: false,
+      sections: [
+        {
+          isPreEnlisted: false,
+          flags: { isHidden: true, isLocked: false, isStarred: true },
+          section: {
+            id: '191-a',
+            courseId: '191',
+            termId: 1261,
+            section: 'A',
+            activity: 'LEC',
+            faculties: [],
+            location: 'ICS LH1',
+            dates: [],
+            activeClassSize: 10,
+            maxClassSize: 30,
+            isPrerogOpen: false,
+            parentClassId: null,
+            parentClass: null,
+          },
+        },
+        {
+          isPreEnlisted: false,
+          flags: { isHidden: false, isLocked: true, isStarred: false },
+          section: {
+            id: '191-b',
+            courseId: '191',
+            termId: 1261,
+            section: 'B',
+            activity: 'LEC',
+            faculties: [],
+            location: 'ICS LH2',
+            dates: [],
+            activeClassSize: 12,
+            maxClassSize: 30,
+            isPrerogOpen: false,
+            parentClassId: null,
+            parentClass: null,
+          },
+        },
+      ],
+    };
+
+    plan.intendedCourses = [cmsc191Initial];
+
+    // Re-searching CMSC 191 with lowercase/extra spaces and a different course_id / instanceId
+    const cmsc191Refetched: CourseEntry = {
+      ...cmsc191Initial,
+      instanceId: 'inst-191-refetched',
+      id: '9191',
+      code: '  cmsc   191 ',
+      isExpanded: false,
+      sections: [
+        {
+          ...cmsc191Initial.sections[0],
+          flags: { isHidden: false, isLocked: false, isStarred: false },
+          section: {
+            ...cmsc191Initial.sections[0].section,
+            activeClassSize: 15,
+          },
+        },
+        {
+          ...cmsc191Initial.sections[1],
+          flags: { isHidden: false, isLocked: false, isStarred: false },
+          section: {
+            ...cmsc191Initial.sections[1].section,
+            activeClassSize: 18,
+          },
+        },
+        {
+          isPreEnlisted: false,
+          flags: { isHidden: false, isLocked: false, isStarred: false },
+          section: {
+            id: '191-c',
+            courseId: '9191',
+            termId: 1261,
+            section: 'C',
+            activity: 'LEC',
+            faculties: [],
+            location: 'ICS LH3',
+            dates: [],
+            activeClassSize: 5,
+            maxClassSize: 30,
+            isPrerogOpen: false,
+            parentClassId: null,
+            parentClass: null,
+          },
+        },
+      ],
+    };
+
+    const dupResult = addSearchedIntendedCourse(plan, cmsc191Refetched);
+    assert.equal(dupResult.outcome, 'updated_existing');
+    assert.equal(dupResult.courseCode, 'CMSC 191');
+    assert.equal(dupResult.unhiddenSectionCount, 1);
+    assert.equal(
+      formatSearchAddStatusMessage(dupResult),
+      'CMSC 191 is already in your list — unhid 1 hidden section.'
+    );
+
+    // No duplicate course card added; existing card is updated in place and expanded.
+    assert.equal(dupResult.plan.intendedCourses.length, 1);
+    const updated = dupResult.plan.intendedCourses[0];
+    assert.equal(updated.instanceId, 'inst-191-orig');
+    assert.equal(updated.code, 'CMSC 191');
+    assert.equal(updated.isExpanded, true);
+    assert.equal(updated.sections.length, 3);
+
+    // Section A: unhidden, freshly fetched capacity preserved, isStarred preserved.
+    assert.equal(updated.sections[0].section.activeClassSize, 15);
+    assert.equal(updated.sections[0].flags.isHidden, false);
+    assert.equal(updated.sections[0].flags.isStarred, true);
+    assert.equal(updated.sections[0].flags.isLocked, false);
+
+    // Section B: freshly fetched capacity preserved, isLocked preserved.
+    assert.equal(updated.sections[1].section.activeClassSize, 18);
+    assert.equal(updated.sections[1].flags.isHidden, false);
+    assert.equal(updated.sections[1].flags.isLocked, true);
+
+    // Section C: newly fetched section added cleanly as visible.
+    assert.equal(updated.sections[2].section.id, '191-c');
+    assert.equal(updated.sections[2].flags.isHidden, false);
+
+    // Searching again when no sections are hidden refreshes and keeps accordion expanded.
+    const collapsedAgain = toggleCourseAccordion(dupResult.plan, 'inst-191-orig');
+    assert.equal(collapsedAgain.intendedCourses[0].isExpanded, false);
+    const secondDup = addSearchedIntendedCourse(collapsedAgain, cmsc191Refetched);
+    assert.equal(secondDup.outcome, 'updated_existing');
+    assert.equal(secondDup.unhiddenSectionCount, 0);
+    assert.equal(secondDup.plan.intendedCourses.length, 1);
+    assert.equal(secondDup.plan.intendedCourses[0].isExpanded, true);
+    assert.equal(
+      formatSearchAddStatusMessage(secondDup),
+      'CMSC 191 is already in your list — refreshed sections.'
+    );
+
+    // Searching a course already in preEnlistedCourses does not duplicate into intendedCourses.
+    const preSearchResult = addSearchedIntendedCourse(secondDup.plan, {
+      ...makeRawPreEnlistedCourse(),
+      instanceId: 'searched-165',
+      code: 'cmsc 165',
+      termId: 1261,
+      isPreEnlisted: false,
+    });
+    assert.equal(preSearchResult.outcome, 'already_pre_enlisted');
+    assert.equal(preSearchResult.plan.intendedCourses.length, 1);
+    assert.equal(
+      formatSearchAddStatusMessage(preSearchResult),
+      'CMSC 165 is already pre-enlisted in your schedule.'
     );
   });
 });

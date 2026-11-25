@@ -186,14 +186,57 @@ export function toggleCourseAccordion(
 }
 
 /**
- * Adds a newly fetched AMIS course or updates an existing non-repeatable course in place,
- * preserving user section flags (`isHidden`, `isLocked`, `isStarred`) keyed by `section.id`.
- * Drops any stale courses explicitly tagged with a different `termId` to preserve term isolation.
+ * Normalizes an AMIS course code by trimming, collapsing internal whitespace,
+ * and uppercasing (e.g., `"  cmsc   191 "` -> `"CMSC 191"`).
  */
-export function addOrUpdateIntendedCourse(
+export function normalizeCourseCode(code: string): string {
+  return code.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+export interface AddOrUpdateIntendedCourseOptions {
+  /**
+   * When true (interactive search/add), unhides all sections (`isHidden: false`)
+   * while preserving `isLocked`/`isStarred`, and expands the course accordion.
+   */
+  unhideAndExpandExisting?: boolean;
+}
+
+export type SearchAddCourseOutcome =
+  | 'added'
+  | 'updated_existing'
+  | 'already_pre_enlisted';
+
+export interface AddSearchedIntendedCourseResult {
+  plan: AcademicPlanState;
+  outcome: SearchAddCourseOutcome;
+  courseCode: string;
+  unhiddenSectionCount: number;
+}
+
+function findMatchingCourseIndex(
+  courses: readonly CourseEntry[],
+  target: CourseEntry
+): number {
+  const normalizedTargetCode = normalizeCourseCode(target.code);
+  return courses.findIndex(
+    (c) =>
+      (target.instanceId !== '' && c.instanceId === target.instanceId) ||
+      (normalizedTargetCode !== '' &&
+        normalizeCourseCode(c.code) === normalizedTargetCode) ||
+      (!target.canEnrollMultiple && c.id === target.id)
+  );
+}
+
+function addOrUpdateIntendedCourseInternal(
   plan: AcademicPlanState,
-  incomingCourse: CourseEntry
-): AcademicPlanState {
+  incomingCourse: CourseEntry,
+  options?: AddOrUpdateIntendedCourseOptions
+): {
+  plan: AcademicPlanState;
+  matchedExisting: boolean;
+  courseCode: string;
+  unhiddenSectionCount: number;
+} {
   const incomingTermId =
     typeof incomingCourse.termId === 'number' && Number.isFinite(incomingCourse.termId)
       ? incomingCourse.termId
@@ -206,21 +249,24 @@ export function addOrUpdateIntendedCourse(
         )
       : plan.intendedCourses;
 
-  const existingIdx = !incomingCourse.canEnrollMultiple
-    ? sameTermIntended.findIndex((c) => c.id === incomingCourse.id)
-    : -1;
+  const existingIdx = findMatchingCourseIndex(sameTermIntended, incomingCourse);
 
   if (existingIdx === -1) {
     return {
-      ...plan,
-      intendedCourses: [
-        ...sameTermIntended,
-        {
-          ...incomingCourse,
-          isPreEnlisted: false,
-          isExpanded: true,
-        },
-      ],
+      plan: {
+        ...plan,
+        intendedCourses: [
+          ...sameTermIntended,
+          {
+            ...incomingCourse,
+            isPreEnlisted: false,
+            isExpanded: true,
+          },
+        ],
+      },
+      matchedExisting: false,
+      courseCode: incomingCourse.code,
+      unhiddenSectionCount: 0,
     };
   }
 
@@ -228,20 +274,33 @@ export function addOrUpdateIntendedCourse(
   const prevFlagsBySectionId = new Map(
     existing.sections.map((opt) => [opt.section.id, opt.flags])
   );
+  const unhideAndExpand = Boolean(options?.unhideAndExpandExisting);
+  let unhiddenSectionCount = 0;
 
   const mergedCourse: CourseEntry = {
     ...incomingCourse,
+    code: existing.code.trim() ? existing.code : incomingCourse.code,
     instanceId: existing.instanceId,
     isPreEnlisted: false,
-    isExpanded: existing.isExpanded,
+    isExpanded: unhideAndExpand ? true : existing.isExpanded,
     sections: incomingCourse.sections.map((opt) => {
       const prevFlags = prevFlagsBySectionId.get(opt.section.id);
-      return prevFlags
-        ? {
-            ...opt,
-            flags: { ...prevFlags },
-          }
-        : opt;
+      if (!prevFlags) {
+        return unhideAndExpand && opt.flags.isHidden
+          ? { ...opt, flags: { ...opt.flags, isHidden: false } }
+          : opt;
+      }
+      if (unhideAndExpand && prevFlags.isHidden) {
+        unhiddenSectionCount += 1;
+      }
+      return {
+        ...opt,
+        flags: {
+          isHidden: unhideAndExpand ? false : prevFlags.isHidden,
+          isLocked: prevFlags.isLocked,
+          isStarred: prevFlags.isStarred,
+        },
+      };
     }),
   };
 
@@ -249,9 +308,100 @@ export function addOrUpdateIntendedCourse(
   nextCourses[existingIdx] = mergedCourse;
 
   return {
-    ...plan,
-    intendedCourses: nextCourses,
+    plan: {
+      ...plan,
+      intendedCourses: nextCourses,
+    },
+    matchedExisting: true,
+    courseCode: mergedCourse.code,
+    unhiddenSectionCount,
   };
+}
+
+/**
+ * Adds a newly fetched AMIS course or updates an existing course in place
+ * (matched by `instanceId`, normalized course code, or non-repeatable `id`),
+ * preserving user section flags (`isHidden`, `isLocked`, `isStarred`) keyed by `section.id`.
+ * Drops any stale courses explicitly tagged with a different `termId` to preserve term isolation.
+ */
+export function addOrUpdateIntendedCourse(
+  plan: AcademicPlanState,
+  incomingCourse: CourseEntry,
+  options?: AddOrUpdateIntendedCourseOptions
+): AcademicPlanState {
+  return addOrUpdateIntendedCourseInternal(plan, incomingCourse, options).plan;
+}
+
+/**
+ * Handles interactive Search & Add for a freshly fetched AMIS course:
+ * - Deduplicates against `intendedCourses` (and `preEnlistedCourses`) using normalized course codes.
+ * - When already in `intendedCourses`, updates sections in place, sets `isHidden: false` on all
+ *   sections while preserving `isLocked` and `isStarred`, and expands the course accordion.
+ */
+export function addSearchedIntendedCourse(
+  plan: AcademicPlanState,
+  incomingCourse: CourseEntry
+): AddSearchedIntendedCourseResult {
+  const incomingTermId =
+    typeof incomingCourse.termId === 'number' && Number.isFinite(incomingCourse.termId)
+      ? incomingCourse.termId
+      : null;
+
+  const result = addOrUpdateIntendedCourseInternal(plan, incomingCourse, {
+    unhideAndExpandExisting: true,
+  });
+
+  if (result.matchedExisting) {
+    return {
+      plan: result.plan,
+      outcome: 'updated_existing',
+      courseCode: result.courseCode,
+      unhiddenSectionCount: result.unhiddenSectionCount,
+    };
+  }
+
+  const sameTermPreEnlisted =
+    incomingTermId !== null
+      ? plan.preEnlistedCourses.filter(
+          (c) => typeof c.termId !== 'number' || c.termId === incomingTermId
+        )
+      : plan.preEnlistedCourses;
+
+  const preEnlistedIdx = findMatchingCourseIndex(sameTermPreEnlisted, incomingCourse);
+  if (preEnlistedIdx !== -1) {
+    return {
+      plan,
+      outcome: 'already_pre_enlisted',
+      courseCode: sameTermPreEnlisted[preEnlistedIdx].code,
+      unhiddenSectionCount: 0,
+    };
+  }
+
+  return {
+    plan: result.plan,
+    outcome: 'added',
+    courseCode: result.courseCode,
+    unhiddenSectionCount: 0,
+  };
+}
+
+/**
+ * Formats a concise status banner message when a searched course was already present.
+ */
+export function formatSearchAddStatusMessage(
+  result: Pick<AddSearchedIntendedCourseResult, 'outcome' | 'courseCode' | 'unhiddenSectionCount'>
+): string | null {
+  if (result.outcome === 'updated_existing') {
+    if (result.unhiddenSectionCount > 0) {
+      const sectionWord = result.unhiddenSectionCount === 1 ? 'section' : 'sections';
+      return `${result.courseCode} is already in your list — unhid ${result.unhiddenSectionCount} hidden ${sectionWord}.`;
+    }
+    return `${result.courseCode} is already in your list — refreshed sections.`;
+  }
+  if (result.outcome === 'already_pre_enlisted') {
+    return `${result.courseCode} is already pre-enlisted in your schedule.`;
+  }
+  return null;
 }
 
 /**
