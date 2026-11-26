@@ -2638,7 +2638,7 @@ html.amisync-overlay #root {
 }
 
 .compare-modal-backdrop--overlay {
-  padding: 14px;
+  padding: 10px 14px;
 }
 
 .compare-modal-backdrop--popup {
@@ -2651,7 +2651,7 @@ html.amisync-overlay #root {
   width: 100%;
   height: 100%;
   max-width: 1260px;
-  max-height: 780px;
+  max-height: 92vh;
   background-color: var(--surface-white);
   border-radius: 8px;
   border: 1px solid rgba(15, 23, 42, 0.16);
@@ -2671,7 +2671,7 @@ html.amisync-overlay #root {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 44px;
+  height: 40px;
   padding: 0 14px;
   background-color: var(--up-maroon);
   color: #ffffff;
@@ -2741,8 +2741,8 @@ html.amisync-overlay #root {
   min-width: 0;
   min-height: 0;
   display: grid;
-  gap: 12px;
-  padding: 12px;
+  gap: 10px;
+  padding: 10px 12px;
   background-color: var(--canvas-bg);
   overflow: hidden;
 }
@@ -2787,7 +2787,7 @@ html.amisync-overlay #root {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   background-color: var(--surface-subtle);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
@@ -2874,8 +2874,8 @@ html.amisync-overlay #root {
 /* Mini Visual Timetable Grid (Overlay Mode) */
 .mini-timetable {
   flex: 1 1 0;
-  min-height: 168px;
-  margin: 8px 8px 0;
+  min-height: 120px;
+  margin: 6px 8px 0;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   overflow: hidden;
@@ -2887,7 +2887,7 @@ html.amisync-overlay #root {
 .mini-timetable__grid {
   display: grid;
   grid-template-columns: 32px repeat(6, minmax(0, 1fr));
-  grid-template-rows: 19px minmax(0, 1fr);
+  grid-template-rows: 17px minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -3032,8 +3032,8 @@ html.amisync-overlay #root {
 .compare-card__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding: 8px 8px 6px;
+  gap: 5px;
+  padding: 6px 8px 5px;
   flex-shrink: 0;
 }
 
@@ -3046,8 +3046,8 @@ html.amisync-overlay #root {
 .compare-metric {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 6px;
+  gap: 1px;
+  padding: 4px 6px;
   border-radius: 4px;
   background-color: var(--canvas-bg);
   border: 1px solid var(--border-subtle);
@@ -3080,20 +3080,19 @@ html.amisync-overlay #root {
 .compare-card__courses {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 0 8px 8px;
-  padding: 6px 8px;
+  gap: 3px;
+  margin: 0 8px 6px;
+  padding: 5px 8px;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   background-color: #ffffff;
-  min-height: 0;
-  overflow: hidden;
-  flex: 0 1 94px;
+  overflow: visible;
+  flex: 0 0 auto;
 }
 
 .compare-modal--popup .compare-card__courses {
-  flex: 1 1 0;
-  margin: 0 8px 7px;
+  flex: 1 0 auto;
+  margin: 0 8px 6px;
 }
 
 .compare-card__courses-title {
@@ -3111,25 +3110,26 @@ html.amisync-overlay #root {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
+  gap: 1px;
+  overflow: visible;
 }
 
 .compare-course-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  padding: 1.5px 0;
   font-size: 11px;
-  line-height: 1.25;
+  line-height: 1.2;
   min-width: 0;
 }
 
 .compare-modal--popup .compare-course-item {
   gap: 6px;
+  padding: 1px 0;
   font-size: 10.5px;
+  line-height: 1.2;
 }
 
 .compare-course-item__primary {
@@ -3208,13 +3208,13 @@ html.amisync-overlay #root {
 
 /* Card Select Action Footer */
 .compare-card__footer {
-  padding: 0 8px 8px;
+  padding: 0 8px 7px;
   flex-shrink: 0;
 }
 
 .compare-card__select-btn {
   width: 100%;
-  height: 34px;
+  height: 32px;
   border: none;
   border-radius: 5px;
   background-color: var(--up-maroon);

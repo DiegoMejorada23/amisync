@@ -635,14 +635,122 @@ describe('Side-by-Side Plan Comparison Modal: State, Metrics & Components', () =
     );
     assert.equal(singleAltHtml, '');
 
-    // 5. CSS enforces zero outer scrollbars and equal-width grid columns in both modes
+    // 5. CSS enforces zero outer scrollbars, zero inner CHOSEN SECTIONS scrollbars, and equal-width grid columns
     const css = fs.readFileSync(path.join(EXT_ROOT, 'src/styles/index.css'), 'utf8');
     assert.match(css, /\.compare-modal-backdrop\s*\{[\s\S]*?overflow:\s*hidden;/);
-    assert.match(css, /\.compare-modal\s*\{[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /\.compare-modal\s*\{[\s\S]*?max-height:\s*92vh;[\s\S]*?overflow:\s*hidden;/);
     assert.match(css, /\.compare-modal--popup\s*\{[\s\S]*?max-width:\s*780px;[\s\S]*?max-height:\s*580px;/);
     assert.match(css, /\.compare-modal__grid\s*\{[\s\S]*?overflow:\s*hidden;/);
     assert.match(css, /\.compare-modal__grid\.grid-cols-2\s*\{[\s\S]*?repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
     assert.match(css, /\.compare-modal__grid\.grid-cols-3\s*\{[\s\S]*?repeat\(3,\s*minmax\(0,\s*1fr\)\);/);
+    assert.match(css, /\.mini-timetable\s*\{[\s\S]*?min-height:\s*120px;/);
+    assert.match(css, /\.compare-card__courses\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?flex:\s*0\s+0\s+auto;/);
+    const courseListRule = css.match(/\.compare-course-list\s*\{[^}]*\}/)?.[0] ?? '';
+    assert.ok(courseListRule.length > 0, 'Expected .compare-course-list CSS rule');
+    assert.ok(!/overflow-y\s*:\s*auto/i.test(courseListRule), '.compare-course-list must not render an inner vertical scrollbar');
+    assert.ok(!/max-height\s*:/i.test(courseListRule), '.compare-course-list must not cap height');
+    assert.match(courseListRule, /overflow:\s*visible;/);
+    assert.match(css, /\.compare-course-item\s*\{[\s\S]*?padding:\s*1\.5px\s+0;[\s\S]*?line-height:\s*1\.2;/);
+  });
+
+  it('renders all courses in a 7-course (21-unit) schedule inside CHOSEN SECTIONS without overflow-y-auto or scroll clipping', async () => {
+    const plan = createDefaultAcademicPlanState();
+    plan.preEnlistedCourses = [
+      makeCourse(
+        '165',
+        'CMSC 165',
+        3,
+        [
+          {
+            id: '165-S',
+            section: 'S',
+            days: ['Tuesday', 'Thursday'],
+            startMinutes: 420,
+            endMinutes: 480,
+            isPreEnlisted: true,
+          },
+        ],
+        true
+      ),
+    ];
+
+    const intendedCourses = [
+      { id: '128', code: 'CMSC 128', secA: 'AB-1L', secB: 'CD-2L', daysA: ['Tuesday', 'Thursday'] as Weekday[], startA: 480, endA: 570, daysB: ['Monday', 'Wednesday'] as Weekday[], startB: 480, endB: 570 },
+      { id: '141', code: 'CMSC 141', secA: 'T-1', secB: 'U-2', daysA: ['Tuesday', 'Thursday'] as Weekday[], startA: 600, endA: 690, daysB: ['Monday', 'Wednesday'] as Weekday[], startB: 600, endB: 690 },
+      { id: '170', code: 'CMSC 170', secA: 'W-1', secB: 'X-2', daysA: ['Monday', 'Wednesday'] as Weekday[], startA: 540, endA: 630, daysB: ['Tuesday', 'Thursday'] as Weekday[], startB: 720, endB: 810 },
+      { id: '191', code: 'CMSC 191', secA: 'EF', secB: 'WX', daysA: ['Friday'] as Weekday[], startA: 480, endA: 660, daysB: ['Friday'] as Weekday[], startB: 780, endB: 960 },
+      { id: '1', code: 'STAT 1', secA: 'A-1', secB: 'B-2', daysA: ['Monday', 'Wednesday'] as Weekday[], startA: 720, endA: 810, daysB: ['Tuesday', 'Thursday'] as Weekday[], startB: 840, endB: 930 },
+      { id: '10', code: 'STS 1', secA: 'C-1', secB: 'D-2', daysA: ['Saturday'] as Weekday[], startA: 540, endA: 720, daysB: ['Saturday'] as Weekday[], startB: 780, endB: 960 },
+    ];
+
+    plan.intendedCourses = intendedCourses.map((c) =>
+      makeCourse(c.id, c.code, 3, [
+        { id: `${c.id}-A`, section: c.secA, days: c.daysA, startMinutes: c.startA, endMinutes: c.endA, isStarred: true },
+        { id: `${c.id}-B`, section: c.secB, days: c.daysB, startMinutes: c.startB, endMinutes: c.endB },
+      ])
+    );
+
+    const alternatives: GeneratedScheduleAlternative[] = [
+      {
+        planLabel: 'Plan A',
+        profileTag: 'Balanced',
+        totalUnits: 21,
+        status: 'OPTIMAL',
+        objectiveScoreZ: 20,
+        selectedSectionIds: ['165-S', ...intendedCourses.map((c) => `${c.id}-A`)],
+        hammingDistanceFromPrev: [],
+      },
+      {
+        planLabel: 'Plan B',
+        profileTag: 'Compact Days',
+        totalUnits: 21,
+        status: 'OPTIMAL',
+        objectiveScoreZ: 55,
+        selectedSectionIds: ['165-S', ...intendedCourses.map((c) => `${c.id}-B`)],
+        hammingDistanceFromPrev: [12],
+      },
+    ];
+
+    const { PlanComparisonModal } = await loadTsxComponent<{
+      PlanComparisonModal: React.ComponentType<{
+        isOpen: boolean;
+        isCompactPopup: boolean;
+        canExpandOverlay: boolean;
+        plan: AcademicPlanState;
+        alternatives: readonly GeneratedScheduleAlternative[];
+        selectedPlanIndex: number;
+        onSelectPlan: (index: number) => void;
+        onClose: () => void;
+      }>;
+    }>('src/components/PlanComparisonModal.tsx');
+
+    for (const isCompactPopup of [false, true]) {
+      const html = renderToStaticMarkup(
+        React.createElement(PlanComparisonModal, {
+          isOpen: true,
+          isCompactPopup,
+          canExpandOverlay: isCompactPopup,
+          plan,
+          alternatives,
+          selectedPlanIndex: 0,
+          onSelectPlan: () => undefined,
+          onClose: () => undefined,
+        })
+      );
+
+      assert.ok(html.includes('21 Units'));
+      assert.ok(!html.includes('overflow-y-auto'), 'Rendered modal markup must not use overflow-y-auto');
+      assert.ok(!/max-h-\[/.test(html), 'Rendered modal markup must not use tight fixed max-h cap on list');
+      assert.equal((html.match(/class="compare-course-item"/g) ?? []).length, 14);
+      assert.equal((html.match(/>Select Plan</g) ?? []).length, 2);
+
+      for (const expectedCode of ['CMSC 165', ...intendedCourses.map((c) => c.code)]) {
+        assert.ok(html.includes(`>${expectedCode}<`), `Expected ${expectedCode} to be rendered in CHOSEN SECTIONS`);
+      }
+      for (const expectedSec of ['SEC S', 'SEC AB-1L', 'SEC T-1', 'SEC W-1', 'SEC EF', 'SEC A-1', 'SEC C-1', 'SEC CD-2L', 'SEC U-2', 'SEC X-2', 'SEC WX', 'SEC B-2', 'SEC D-2']) {
+        assert.ok(html.includes(`>${expectedSec}<`), `Expected ${expectedSec} pill to be visible`);
+      }
+    }
   });
 
   it('persists and consumes one-shot popup-to-overlay compare handoffs via chrome.storage.local', async () => {
