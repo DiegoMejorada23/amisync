@@ -337,11 +337,18 @@ html.amisync-popup #root {
 .plan-bar__legend {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-size: 11.5px;
   color: var(--text-secondary);
   font-weight: 500;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.plan-bar__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .legend-swatch {
@@ -356,6 +363,20 @@ html.amisync-popup #root {
   background-color: #d1fae5;
   border-left: 3px solid #16a34a;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.legend-swatch--unavailable {
+  background-color: #f1f5f9;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--slate-cell),
+    var(--slate-cell) 3px,
+    var(--slate-stripe) 3px,
+    var(--slate-stripe) 6px
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.55),
+    0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 /* Interactive Apple Calendar-Style Timetable Grid */
@@ -743,7 +764,8 @@ html.amisync-popup #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  min-height: 28px;
+  padding: 5px 12px;
   background-color: #b45309;
   border-bottom: 1px solid rgba(120, 53, 15, 0.14);
   color: #ffffff;
@@ -780,11 +802,6 @@ html.amisync-popup #root {
 .conflicts-panel__badge--solving {
   background-color: rgba(255, 255, 255, 0.24);
   color: #ffffff;
-}
-
-.conflicts-panel__badge--clear {
-  background-color: #dcfce7;
-  color: #15803d;
 }
 
 .conflicts-panel__body {
@@ -2287,8 +2304,12 @@ html.amisync-overlay #root {
 }
 
 .app-shell--overlay .plan-bar__legend {
-  gap: 7px;
+  gap: 14px;
   font-size: 13px;
+}
+
+.app-shell--overlay .plan-bar__legend-item {
+  gap: 6px;
 }
 
 .app-shell--overlay .legend-swatch {
@@ -2297,7 +2318,8 @@ html.amisync-overlay #root {
 }
 
 .app-shell--overlay .conflicts-panel__header {
-  padding: 8px 14px;
+  min-height: 36px;
+  padding: 7px 14px;
 }
 
 .app-shell--overlay .conflicts-panel__title {
@@ -2680,7 +2702,7 @@ html.amisync-overlay #root {
 }
 
 .app-shell--popup .plan-bar {
-  gap: 8px;
+  gap: 6px;
 }
 
 .app-shell--popup .plan-bar__selector-group {
@@ -2698,9 +2720,9 @@ html.amisync-overlay #root {
   padding: 0 18px 0 8px;
   border-radius: 6px;
   font-size: 11.5px;
-  flex: 0 1 174px;
-  max-width: 174px;
-  min-width: 92px;
+  flex: 0 1 160px;
+  max-width: 160px;
+  min-width: 78px;
 }
 
 .app-shell--popup .plan-bar__compare-btn {
@@ -2716,13 +2738,17 @@ html.amisync-overlay #root {
 }
 
 .app-shell--popup .plan-bar__legend {
-  gap: 5px;
-  font-size: 11.5px;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.app-shell--popup .plan-bar__legend-item {
+  gap: 4px;
 }
 
 .app-shell--popup .legend-swatch {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
 }
 
 .app-shell--popup .timetable-wrapper {

@@ -82,9 +82,21 @@ export function PlanBar({
         )}
       </div>
 
-      <div className="plan-bar__legend" title="Pre-enlisted AMIS classes are fixed and cannot be moved">
-        <span className="legend-swatch legend-swatch--locked" aria-hidden="true" />
-        <span className="legend-label">Pre-enlisted</span>
+      <div className="plan-bar__legend">
+        <span
+          className="plan-bar__legend-item"
+          title="Pre-enlisted AMIS classes are fixed and cannot be moved"
+        >
+          <span className="legend-swatch legend-swatch--locked" aria-hidden="true" />
+          <span className="legend-label">Pre-enlisted</span>
+        </span>
+        <span
+          className="plan-bar__legend-item"
+          title="Time slots marked unavailable in Preferences & Weights"
+        >
+          <span className="legend-swatch legend-swatch--unavailable" aria-hidden="true" />
+          <span className="legend-label">Unavailable</span>
+        </span>
       </div>
     </div>
   );

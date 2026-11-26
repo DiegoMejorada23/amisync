@@ -47,11 +47,7 @@ export function ScheduleConflictsPanel({
           </span>
         ) : diagnosis ? (
           <span className="conflicts-panel__badge">INFEASIBLE</span>
-        ) : (
-          <span className="conflicts-panel__badge conflicts-panel__badge--clear">
-            0 HARD CLASHES
-          </span>
-        )}
+        ) : null}
       </div>
 
       <div className="conflicts-panel__body">
