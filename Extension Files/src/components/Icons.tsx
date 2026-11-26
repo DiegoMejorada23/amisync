@@ -98,3 +98,14 @@ export function CompareIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function CalendarAppIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" {...props}>
+      <rect x="2" y="3" width="12" height="11" rx="2.4" />
+      <path d="M5.25 1.75v2.2M10.75 1.75v2.2M2.5 6.5h11" strokeLinecap="round" />
+      <rect x="4.5" y="8.5" width="2.2" height="2.2" rx="0.6" fill="currentColor" stroke="none" />
+      <rect x="9.3" y="8.5" width="2.2" height="2.2" rx="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

@@ -22,7 +22,9 @@
       position: 'fixed',
       inset: '0',
       zIndex: '2147483647',
-      backgroundColor: 'rgba(15, 23, 42, 0.55)',
+      backgroundColor: 'rgba(15, 23, 42, 0.42)',
+      backdropFilter: 'blur(6px)',
+      WebkitBackdropFilter: 'blur(6px)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -39,9 +41,9 @@
       height: '90vh',
       maxHeight: '860px',
       border: 'none',
-      borderRadius: '10px',
-      boxShadow: '0 24px 48px rgba(15, 23, 42, 0.35)',
-      backgroundColor: '#F8FAFC',
+      borderRadius: '12px',
+      boxShadow: '0 24px 54px rgba(15, 23, 42, 0.34), 0 8px 20px rgba(15, 23, 42, 0.16)',
+      backgroundColor: '#F2F2F7',
     });
 
     backdrop.addEventListener('click', (event: MouseEvent) => {

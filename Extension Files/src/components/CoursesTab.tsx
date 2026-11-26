@@ -16,8 +16,10 @@ import type {
 } from '../types/domain.ts';
 import { normalizeCourseCode } from '../ui/planActions.ts';
 import {
+  buildIntendedCourseColorMap,
   formatSectionScheduleLines,
   getCapacityBadgeTone,
+  getIntendedCourseColorIndex,
 } from '../ui/scheduleView.ts';
 import {
   ChevronDownIcon,
@@ -102,6 +104,7 @@ export function CoursesTab({
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const isConnected = authStatus === 'connected';
+  const courseColorMap = buildIntendedCourseColorMap(intendedCourses);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -309,6 +312,7 @@ export function CoursesTab({
           )}
 
           {intendedCourses.map((course) => {
+            const colorIndex = getIntendedCourseColorIndex(course, courseColorMap);
             const sectionCount = course.sections.length;
             const sectionWord = sectionCount === 1 ? 'Section' : 'Sections';
             const unitsLabel = Number.isInteger(course.units)
@@ -357,7 +361,10 @@ export function CoursesTab({
                 : 0;
 
             return (
-              <article key={course.instanceId} className="course-card">
+              <article
+                key={course.instanceId}
+                className={`course-card course-card--accent-${colorIndex}`}
+              >
                 <div className="course-card__header">
                   <button
                     type="button"
@@ -372,6 +379,10 @@ export function CoursesTab({
                         <ChevronRightIcon width={14} height={14} />
                       )}
                     </span>
+                    <span
+                      className={`course-card__swatch timetable-block--color-${colorIndex}`}
+                      aria-hidden="true"
+                    />
                     <span className="course-card__code">{course.code}</span>
                     {isExhausted && (
                       <span
@@ -397,7 +408,7 @@ export function CoursesTab({
                     title={`Drop ${course.code}`}
                     onClick={() => onRemoveCourse(course.instanceId)}
                   >
-                    <CloseIcon width={12} height={12} />
+                    <CloseIcon width={13} height={13} />
                   </button>
                 </div>
 

@@ -267,6 +267,31 @@ function pushSectionTimetableBlocks(
 }
 
 /**
+ * Assigns deterministic palette indices (0..5) to intended courses, deduplicated by
+ * normalized course code so Course cards, Timetable blocks, and Comparison swatches match.
+ */
+export function buildIntendedCourseColorMap(
+  intendedCourses: readonly CourseEntry[]
+): Map<string, number> {
+  const courseColorMap = new Map<string, number>();
+  intendedCourses.forEach((course: CourseEntry, idx: number) => {
+    const courseGroupKey = normalizeCourseCodeKey(course.code) || course.id;
+    if (!courseColorMap.has(courseGroupKey)) {
+      courseColorMap.set(courseGroupKey, idx % 6);
+    }
+  });
+  return courseColorMap;
+}
+
+export function getIntendedCourseColorIndex(
+  course: Pick<CourseEntry, 'code' | 'id'>,
+  colorMap: ReadonlyMap<string, number>
+): number {
+  const courseGroupKey = normalizeCourseCodeKey(course.code) || course.id;
+  return colorMap.get(courseGroupKey) ?? 0;
+}
+
+/**
  * Projects pre-enlisted locked sections (mint green) and active generated schedule sections
  * (distinct non-mint pastel course palette) onto the weekly Mon-Sat 7 AM - 7 PM grid.
  */
@@ -307,14 +332,10 @@ export function buildTimetableBlocks(
   // 2. Generated schedule alternative blocks for intended courses.
   if (activeAlternative) {
     const selectedSet = new Set(activeAlternative.selectedSectionIds);
-    const courseColorMap = new Map<string, number>();
+    const courseColorMap = buildIntendedCourseColorMap(plan.intendedCourses);
 
-    plan.intendedCourses.forEach((course: CourseEntry, idx: number) => {
-      const courseGroupKey = normalizeCourseCodeKey(course.code) || course.id;
-      if (!courseColorMap.has(courseGroupKey)) {
-        courseColorMap.set(courseGroupKey, idx % 6);
-      }
-      const colorIndex = courseColorMap.get(courseGroupKey) ?? 0;
+    plan.intendedCourses.forEach((course: CourseEntry) => {
+      const colorIndex = getIntendedCourseColorIndex(course, courseColorMap);
 
       for (const option of course.sections) {
         const chain: NormalizedSection[] = [];

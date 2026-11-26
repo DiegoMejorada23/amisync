@@ -199,7 +199,7 @@ export function TimetableGrid({
                       });
                     }}
                   >
-                    {effectiveBlocked && <span className="timetable-blocked-badge">BLOCKED</span>}
+                    {effectiveBlocked && <span className="timetable-blocked-badge">UNAVAILABLE</span>}
                   </button>
                 );
               })}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_FALLBACK_TERM_ID,
   DEFAULT_FALLBACK_TERMS,
@@ -150,7 +150,7 @@ export default function App() {
 
   const isInIframe = typeof window !== 'undefined' && window.parent !== window;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === 'undefined') {
       return;
     }

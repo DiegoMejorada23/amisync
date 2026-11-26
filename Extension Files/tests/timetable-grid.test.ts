@@ -266,7 +266,7 @@ describe('Timetable Slot Blocking: Tab Gating & Click-and-Drag Range Selection',
     assert.ok(coursesHtml.includes('timetable-grid--readonly'));
     assert.ok(!coursesHtml.includes('timetable-grid--editable'));
     assert.ok(coursesHtml.includes('timetable-slot--blocked'));
-    assert.ok(coursesHtml.includes('BLOCKED'));
+    assert.ok(coursesHtml.includes('UNAVAILABLE'));
     assert.ok(coursesHtml.includes('timetable-slot--readonly'));
     assert.ok(!coursesHtml.includes('Click or drag to block'));
     assert.ok(!coursesHtml.includes('Click or drag to unblock'));

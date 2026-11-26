@@ -84,7 +84,7 @@ export function PlanBar({
 
       <div className="plan-bar__legend" title="Pre-enlisted AMIS classes are fixed and cannot be moved">
         <span className="legend-swatch legend-swatch--locked" aria-hidden="true" />
-        <span className="legend-label">Locked</span>
+        <span className="legend-label">Pre-enlisted</span>
       </div>
     </div>
   );

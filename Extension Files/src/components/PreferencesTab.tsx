@@ -1,5 +1,11 @@
+import type { CSSProperties } from 'react';
 import type { PreferencePriority, StudentPreferences } from '../types/domain.ts';
 import { formatSliderTime12h } from '../ui/scheduleView.ts';
+
+function sliderProgressStyle(value: number, min: number, max: number): CSSProperties {
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+  return { '--slider-pct': `${pct}%` } as CSSProperties;
+}
 
 interface PreferencesTabProps {
   preferences: StudentPreferences;
@@ -97,6 +103,7 @@ export function PreferencesTab({
               max={12}
               step={1}
               value={preferences.fatigueLimit.maxConsecutiveHours}
+              style={sliderProgressStyle(preferences.fatigueLimit.maxConsecutiveHours, 1, 12)}
               onChange={(e) => {
                 const maxConsecutiveHours = Number(e.target.value);
                 onChangePreferences((prev) => ({
@@ -153,6 +160,11 @@ export function PreferencesTab({
               max={1140}
               step={30}
               value={preferences.acceptableDayBounds.earliestStartMinutes}
+              style={sliderProgressStyle(
+                preferences.acceptableDayBounds.earliestStartMinutes,
+                420,
+                1140
+              )}
               onChange={(e) => {
                 const earliestStartMinutes = Number(e.target.value);
                 onChangePreferences((prev) => ({
@@ -194,6 +206,11 @@ export function PreferencesTab({
               max={1140}
               step={30}
               value={preferences.acceptableDayBounds.latestEndMinutes}
+              style={sliderProgressStyle(
+                preferences.acceptableDayBounds.latestEndMinutes,
+                420,
+                1140
+              )}
               onChange={(e) => {
                 const latestEndMinutes = Number(e.target.value);
                 onChangePreferences((prev) => ({
