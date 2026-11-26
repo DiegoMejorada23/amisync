@@ -44,6 +44,7 @@ import {
   createDefaultAcademicPlanState,
   type AcademicPlanState,
   type AcademicTermOption,
+  type NstpTrackFilter,
   type StudentPreferences,
   type Weekday,
 } from './types/domain.ts';
@@ -54,6 +55,7 @@ import type {
 import {
   addSearchedIntendedCourse,
   applyBlockedCellsRange,
+  applyNstpTrackFilter,
   applyRelaxationActionToPlan,
   formatSearchAddStatusMessage,
   reconcileSyncedPlan,
@@ -743,6 +745,13 @@ export default function App() {
     [commitPlan]
   );
 
+  const handleSelectNstpTrackFilter = useCallback(
+    (instanceId: string, trackFilter: NstpTrackFilter) => {
+      commitPlan((prev) => applyNstpTrackFilter(prev, instanceId, trackFilter));
+    },
+    [commitPlan]
+  );
+
   const handleRemoveCourse = useCallback(
     (instanceId: string) => {
       commitPlan((prev) => removeIntendedCourse(prev, instanceId));
@@ -952,6 +961,7 @@ export default function App() {
                 onRemoveCourse={handleRemoveCourse}
                 onToggleAccordion={handleToggleAccordion}
                 onToggleSectionFlag={handleToggleSectionFlag}
+                onSelectNstpTrackFilter={handleSelectNstpTrackFilter}
                 onGenerateSchedules={handleGenerateSchedules}
                 onCancelSolve={handleCancelSolve}
               />

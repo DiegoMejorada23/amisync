@@ -107,6 +107,32 @@ function validateNormalizedSection(
   if (rawSection.parentClassId !== null && typeof rawSection.parentClassId !== 'string') {
     throw new AmisError('MALFORMED_RESPONSE', `${path}.parentClassId must be string or null.`);
   }
+  if (
+    rawSection.subtitle !== undefined &&
+    rawSection.subtitle !== null &&
+    typeof rawSection.subtitle !== 'string'
+  ) {
+    throw new AmisError('MALFORMED_RESPONSE', `${path}.subtitle must be string or null.`);
+  }
+  if (
+    rawSection.notes !== undefined &&
+    rawSection.notes !== null &&
+    typeof rawSection.notes !== 'string'
+  ) {
+    throw new AmisError('MALFORMED_RESPONSE', `${path}.notes must be string or null.`);
+  }
+  if (
+    rawSection.track !== undefined &&
+    rawSection.track !== 'CWTS' &&
+    rawSection.track !== 'LTS' &&
+    rawSection.track !== 'ROTC' &&
+    rawSection.track !== 'Unlabeled'
+  ) {
+    throw new AmisError(
+      'MALFORMED_RESPONSE',
+      `${path}.track must be CWTS, LTS, ROTC, or Unlabeled.`
+    );
+  }
   if (rawSection.parentClass !== null) {
     const nextVisited = new Set(visitedIds);
     nextVisited.add(rawSection.id);
@@ -133,6 +159,13 @@ function validateCourseEntryList(entries: unknown, fieldName: string): CourseEnt
       typeof entry.canEnrollMultiple !== 'boolean' ||
       typeof entry.isPreEnlisted !== 'boolean' ||
       typeof entry.isExpanded !== 'boolean' ||
+      (entry.subtitle !== undefined && entry.subtitle !== null && typeof entry.subtitle !== 'string') ||
+      (entry.nstpTrackFilter !== undefined &&
+        entry.nstpTrackFilter !== 'All' &&
+        entry.nstpTrackFilter !== 'CWTS' &&
+        entry.nstpTrackFilter !== 'LTS' &&
+        entry.nstpTrackFilter !== 'ROTC' &&
+        entry.nstpTrackFilter !== 'Unlabeled') ||
       !Array.isArray(entry.requiredComponents) ||
       entry.requiredComponents.some((c) => typeof c !== 'string') ||
       !Array.isArray(entry.sections)

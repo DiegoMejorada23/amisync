@@ -22,6 +22,9 @@ export const WEEKDAYS: readonly Weekday[] = [
 
 export type ComponentType = 'LEC' | 'LAB' | 'RECIT' | string;
 
+export type NstpTrack = 'CWTS' | 'LTS' | 'ROTC' | 'Unlabeled';
+export type NstpTrackFilter = 'All' | NstpTrack;
+
 export interface FacultyName {
   firstName: string;
   middleName: string;
@@ -65,6 +68,9 @@ export interface NormalizedSection {
   isPrerogOpen: boolean;
   parentClassId: string | null;      // Derived from parent.id ?? parent_class_id
   parentClass: NormalizedSection | null;
+  subtitle?: string | null;          // Optional section/course subtitle metadata
+  notes?: string | null;             // Optional section notes/remarks metadata
+  track?: NstpTrack;                 // Classified NSTP component track when applicable
 }
 
 /**
@@ -93,6 +99,8 @@ export interface CourseEntry {
   requiredComponents: ComponentType[]; // Derived during preprocessing (e.g., ["LEC", "LAB"])
   sections: CourseSectionOption[];
   isExpanded: boolean;               // Accordion UI state
+  subtitle?: string | null;          // Optional course subtitle/title metadata
+  nstpTrackFilter?: NstpTrackFilter; // Active NSTP track filter pill in Courses tab
 }
 
 export type PreferencePriority = 'Off' | 'Low' | 'Medium' | 'High';

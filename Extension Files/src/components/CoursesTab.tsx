@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react';
 import { shortenTermSemesterText } from '../amis/index.ts';
-import { checkExhaustedCapacity } from '../amis/parser.ts';
+import {
+  checkExhaustedCapacity,
+  computeNstpTrackCounts,
+  getSectionNstpTrack,
+  isNstpCourse,
+  NSTP_TRACK_ORDER,
+  sortCourseSectionsForDisplay,
+} from '../amis/parser.ts';
 import type { RawAmisCourse } from '../types/amis.ts';
-import type { AcademicTermOption, CourseEntry } from '../types/domain.ts';
+import type {
+  AcademicTermOption,
+  CourseEntry,
+  NstpTrackFilter,
+} from '../types/domain.ts';
 import { normalizeCourseCode } from '../ui/planActions.ts';
 import {
   formatSectionScheduleLines,
@@ -53,6 +64,7 @@ interface CoursesTabProps {
     sectionId: string,
     flag: 'isHidden' | 'isLocked' | 'isStarred'
   ) => void;
+  onSelectNstpTrackFilter: (instanceId: string, trackFilter: NstpTrackFilter) => void;
   onGenerateSchedules: () => void;
   onCancelSolve: () => void;
 }
@@ -79,6 +91,7 @@ export function CoursesTab({
   onRemoveCourse,
   onToggleAccordion,
   onToggleSectionFlag,
+  onSelectNstpTrackFilter,
   onGenerateSchedules,
   onCancelSolve,
 }: CoursesTabProps) {
@@ -301,6 +314,45 @@ export function CoursesTab({
               : `${Number(course.units.toFixed(1))}`;
             const unitWord = course.units === 1 ? 'unit' : 'units';
             const isExhausted = checkExhaustedCapacity(course).exhausted;
+            const isNstp = isNstpCourse(course.code);
+            const orderedSections = isNstp
+              ? sortCourseSectionsForDisplay(course.sections, course.code)
+              : course.sections;
+            const trackCounts = isNstp
+              ? computeNstpTrackCounts(orderedSections, course.code)
+              : null;
+            const requestedTrack = course.nstpTrackFilter ?? 'All';
+            const activeTrackFilter: NstpTrackFilter =
+              isNstp &&
+              requestedTrack !== 'All' &&
+              trackCounts !== null &&
+              trackCounts[requestedTrack] > 0
+                ? requestedTrack
+                : 'All';
+            const visibleSections =
+              isNstp && activeTrackFilter !== 'All'
+                ? orderedSections.filter(
+                    (opt) => getSectionNstpTrack(opt.section, course.code) === activeTrackFilter
+                  )
+                : orderedSections;
+            const hiddenOtherTrackCount =
+              isNstp && activeTrackFilter !== 'All'
+                ? orderedSections.filter(
+                    (opt) =>
+                      !opt.isPreEnlisted &&
+                      getSectionNstpTrack(opt.section, course.code) !== activeTrackFilter &&
+                      opt.flags.isHidden
+                  ).length
+                : 0;
+            const unhiddenOtherTrackCount =
+              isNstp && activeTrackFilter !== 'All'
+                ? orderedSections.filter(
+                    (opt) =>
+                      !opt.isPreEnlisted &&
+                      getSectionNstpTrack(opt.section, course.code) !== activeTrackFilter &&
+                      !opt.flags.isHidden
+                  ).length
+                : 0;
 
             return (
               <article key={course.instanceId} className="course-card">
@@ -350,28 +402,108 @@ export function CoursesTab({
                         No active sections found for term {selectedTermId}.
                       </div>
                     ) : (
-                      course.sections.map((option) => {
-                        const sec = option.section;
-                        const tone = getCapacityBadgeTone(sec.activeClassSize, sec.maxClassSize);
-                        const scheduleLines = formatSectionScheduleLines(sec);
-
-                        return (
+                      <>
+                        {isNstp && trackCounts && (
                           <div
-                            key={sec.id}
-                            className={`section-card ${
-                              option.flags.isHidden ? 'section-card--hidden' : ''
-                            } ${option.flags.isLocked ? 'section-card--locked' : ''}`}
+                            className="nstp-track-filter-bar"
+                            role="group"
+                            aria-label={`${course.code} track filter`}
                           >
-                            <div className="section-card__main">
-                              <div className="section-card__top">
-                                <span className="section-card__name">SEC {sec.section}</span>
-                                <span className={`capacity-ratio capacity-ratio--${tone}`}>
-                                  {sec.activeClassSize}/{sec.maxClassSize}
+                            <div className="nstp-track-pills">
+                              {(['All', ...NSTP_TRACK_ORDER] as const).map((trackKey) => {
+                                const count = trackCounts[trackKey];
+                                const isActive = activeTrackFilter === trackKey;
+                                const isDisabled = trackKey !== 'All' && count === 0;
+                                return (
+                                  <button
+                                    key={trackKey}
+                                    type="button"
+                                    className={`nstp-track-pill ${
+                                      isActive ? 'nstp-track-pill--active' : ''
+                                    }`}
+                                    aria-pressed={isActive}
+                                    disabled={isDisabled}
+                                    title={
+                                      trackKey === 'All'
+                                        ? `Show all ${count} sections and unhide hidden tracks`
+                                        : count === 0
+                                          ? `No ${trackKey} sections available`
+                                          : `Show only ${trackKey} sections and hide other tracks from solver`
+                                    }
+                                    onClick={() =>
+                                      onSelectNstpTrackFilter(course.instanceId, trackKey)
+                                    }
+                                  >
+                                    {trackKey} ({count})
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {activeTrackFilter !== 'All' && (
+                              <div className="nstp-track-filter-hint">
+                                <span>
+                                  {unhiddenOtherTrackCount > 0
+                                    ? `Filtering ${activeTrackFilter} (${unhiddenOtherTrackCount} other-track active)`
+                                    : `Only ${activeTrackFilter} active in solver (${hiddenOtherTrackCount} hidden)`}
                                 </span>
-                                {option.isPreEnlisted && (
-                                  <span className="section-tag-locked">Pre-enlisted</span>
-                                )}
+                                <div className="nstp-track-filter-actions">
+                                  {unhiddenOtherTrackCount > 0 && (
+                                    <button
+                                      type="button"
+                                      className="nstp-track-action-btn"
+                                      onClick={() =>
+                                        onSelectNstpTrackFilter(course.instanceId, activeTrackFilter)
+                                      }
+                                    >
+                                      Use Only {activeTrackFilter}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    className="nstp-track-reset-btn"
+                                    onClick={() =>
+                                      onSelectNstpTrackFilter(course.instanceId, 'All')
+                                    }
+                                  >
+                                    Show All
+                                  </button>
+                                </div>
                               </div>
+                            )}
+                          </div>
+                        )}
+
+                        {visibleSections.map((option) => {
+                          const sec = option.section;
+                          const tone = getCapacityBadgeTone(sec.activeClassSize, sec.maxClassSize);
+                          const scheduleLines = formatSectionScheduleLines(sec);
+                          const nstpTrack = isNstp ? getSectionNstpTrack(sec, course.code) : null;
+
+                          return (
+                            <div
+                              key={sec.id}
+                              className={`section-card ${
+                                option.flags.isHidden ? 'section-card--hidden' : ''
+                              } ${option.flags.isLocked ? 'section-card--locked' : ''}`}
+                            >
+                              <div className="section-card__main">
+                                <div className="section-card__top">
+                                  <span className="section-card__name">SEC {sec.section}</span>
+                                  {nstpTrack && (
+                                    <span
+                                      className={`section-track-badge section-track-badge--${nstpTrack.toLowerCase()}`}
+                                    >
+                                      {nstpTrack}
+                                    </span>
+                                  )}
+                                  <span className={`capacity-ratio capacity-ratio--${tone}`}>
+                                    {sec.activeClassSize}/{sec.maxClassSize}
+                                  </span>
+                                  {option.isPreEnlisted && (
+                                    <span className="section-tag-locked">Pre-enlisted</span>
+                                  )}
+                                </div>
 
                               <div className="section-card__lines">
                                 {scheduleLines.map((line, i) => (
@@ -458,7 +590,8 @@ export function CoursesTab({
                             </div>
                           </div>
                         );
-                      })
+                      })}
+                      </>
                     )}
                   </div>
                 )}

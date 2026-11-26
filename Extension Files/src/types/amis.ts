@@ -54,6 +54,10 @@ export interface RawAmisCourse {
   course_code: string;
   units: string | number;
   is_multiple_enrollment: boolean;
+  course_title?: string | null;
+  title?: string | null;
+  subtitle?: string | null;
+  description?: string | null;
 }
 
 export interface RawAmisCoursesResponse {
@@ -87,6 +91,14 @@ export interface RawAmisClass {
   term_id?: number | string;
   section: string;
   activity: string; // e.g., "LEC", "LAB", "RECIT", or ""
+  title?: string | null;
+  subtitle?: string | null;
+  course_subtitle?: string | null;
+  course_title?: string | null;
+  section_title?: string | null;
+  notes?: string | null;
+  remarks?: string | null;
+  description?: string | null;
   hide_faculty: boolean;
   faculties: RawAmisFacultyWrapper[];
   facility_id: string | null;

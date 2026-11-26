@@ -1306,6 +1306,134 @@ html.amisync-popup #root {
   font-weight: 700;
 }
 
+/* NSTP Component Track Badges & Filter Bar */
+.nstp-track-filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background-color: var(--canvas-bg);
+}
+
+.nstp-track-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.nstp-track-pill {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background-color: var(--surface-white);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.nstp-track-pill:hover:not(:disabled):not(.nstp-track-pill--active) {
+  background-color: var(--surface-subtle);
+  border-color: #94a3b8;
+  color: var(--text-primary);
+}
+
+.nstp-track-pill--active {
+  background-color: var(--up-maroon);
+  border-color: var(--up-maroon);
+  color: #ffffff;
+}
+
+.nstp-track-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nstp-track-filter-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.nstp-track-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.nstp-track-action-btn,
+.nstp-track-reset-btn {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nstp-track-action-btn {
+  border: 1px solid rgba(123, 17, 19, 0.35);
+  background-color: #fdf2f2;
+  color: var(--up-maroon);
+}
+
+.nstp-track-action-btn:hover {
+  background-color: #fce7e7;
+}
+
+.nstp-track-reset-btn {
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface-white);
+  color: var(--text-secondary);
+}
+
+.nstp-track-reset-btn:hover {
+  background-color: var(--surface-subtle);
+}
+
+.section-track-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.section-track-badge--cwts {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.section-track-badge--lts {
+  background-color: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.section-track-badge--rotc {
+  background-color: #fffbeb;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.section-track-badge--unlabeled {
+  background-color: var(--surface-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong);
+}
+
 .section-card__lines {
   display: flex;
   flex-direction: column;
@@ -1849,6 +1977,31 @@ html.amisync-overlay #root {
   font-size: 11.5px;
 }
 
+.app-shell--overlay .nstp-track-filter-bar {
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+.app-shell--overlay .nstp-track-pill {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.app-shell--overlay .nstp-track-filter-hint {
+  font-size: 11.5px;
+}
+
+.app-shell--overlay .nstp-track-action-btn,
+.app-shell--overlay .nstp-track-reset-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.app-shell--overlay .section-track-badge {
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
 .app-shell--overlay .section-card__line {
   font-size: 12.5px;
   line-height: 1.4;
@@ -2262,6 +2415,25 @@ html.amisync-overlay #root {
 
 .app-shell--popup .section-card__line {
   font-size: 10.5px;
+}
+
+.app-shell--popup .nstp-track-filter-bar {
+  padding: 5px 7px;
+  gap: 4px;
+}
+
+.app-shell--popup .nstp-track-pill {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.app-shell--popup .nstp-track-filter-hint {
+  font-size: 10px;
+}
+
+.app-shell--popup .section-track-badge {
+  padding: 1px 5px;
+  font-size: 9px;
 }
 
 .app-shell--popup .icon-toggle-btn {

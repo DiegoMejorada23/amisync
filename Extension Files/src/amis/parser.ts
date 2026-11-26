@@ -5,6 +5,8 @@ import type {
   CourseSectionOption,
   FacultyName,
   NormalizedSection,
+  NstpTrack,
+  NstpTrackFilter,
   TimeslotInterval,
   Weekday,
 } from '../types/domain.ts';
@@ -14,6 +16,22 @@ const TIME_12H_REGEX = /^(\d{1,2}):(\d{2})\s*([APap][Mm])$/;
 
 export const DEFAULT_COMPONENT_TYPE: ComponentType = 'DEFAULT';
 export const SUBCOMPONENT_TYPE: ComponentType = 'SUBCOMPONENT';
+
+export const NSTP_TRACK_ORDER: readonly NstpTrack[] = ['CWTS', 'LTS', 'ROTC', 'Unlabeled'] as const;
+
+const NSTP_TRACK_RANK: Readonly<Record<NstpTrack, number>> = {
+  CWTS: 0,
+  LTS: 1,
+  ROTC: 2,
+  Unlabeled: 3,
+};
+
+const CWTS_TRACK_REGEX =
+  /(?:^|[^a-z])cwts(?=$|[^a-z])|\bcivic\s+welfare(?:\s+training\s+service)?\b/i;
+const LTS_TRACK_REGEX =
+  /(?:^|[^a-z])lts(?=$|[^a-z])|\bliteracy\s+training(?:\s+service)?\b/i;
+const ROTC_TRACK_REGEX =
+  /(?:^|[^a-z])rotc(?=$|[^a-z])|\breserve\s+officers?['’]?\s+training\s+corps\b/i;
 
 const STANDARD_COMPONENT_MAP: Readonly<Record<string, ComponentType>> = {
   LEC: 'LEC',
@@ -32,6 +50,137 @@ const STANDARD_COMPONENT_MAP: Readonly<Record<string, ComponentType>> = {
  */
 export function normalizeCourseCodeKey(code: string): string {
   return code.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/**
+ * Returns true if the given course code is an NSTP course (e.g., `"NSTP 1"`, `"NSTP 2"`, `"NSTP2"`).
+ */
+export function isNstpCourse(courseCode: string): boolean {
+  const normalized = normalizeCourseCodeKey(courseCode);
+  return /^NSTP(?:\b|\d)/.test(normalized);
+}
+
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+  return null;
+}
+
+function detectExplicitNstpTrackFromText(text: string | null | undefined): NstpTrack | null {
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    return null;
+  }
+  const candidates: Array<{ track: NstpTrack; index: number }> = [];
+  const cwtsMatch = CWTS_TRACK_REGEX.exec(text);
+  if (cwtsMatch) {
+    candidates.push({ track: 'CWTS', index: cwtsMatch.index });
+  }
+  const ltsMatch = LTS_TRACK_REGEX.exec(text);
+  if (ltsMatch) {
+    candidates.push({ track: 'LTS', index: ltsMatch.index });
+  }
+  const rotcMatch = ROTC_TRACK_REGEX.exec(text);
+  if (rotcMatch) {
+    candidates.push({ track: 'ROTC', index: rotcMatch.index });
+  }
+  if (candidates.length === 0) {
+    return null;
+  }
+  candidates.sort((a, b) => a.index - b.index);
+  return candidates[0].track;
+}
+
+export interface NstpTrackClassificationInput {
+  section?: string | null;
+  activity?: string | null;
+  subtitle?: string | null;
+  sectionTitle?: string | null;
+  courseSubtitle?: string | null;
+  title?: string | null;
+  courseTitle?: string | null;
+  notes?: string | null;
+  remarks?: string | null;
+  description?: string | null;
+  parentSection?: NormalizedSection | null;
+}
+
+/**
+ * Classifies an NSTP section into `'CWTS'`, `'LTS'`, `'ROTC'`, or `'Unlabeled'` by inspecting
+ * section naming conventions, activity/subtitle/title fields, notes, and parent sections.
+ */
+export function classifyNstpSectionTrack(input: NstpTrackClassificationInput): NstpTrack {
+  const orderedFields: Array<string | null | undefined> = [
+    input.sectionTitle,
+    input.subtitle,
+    input.courseSubtitle,
+    input.activity,
+    input.section,
+    input.title,
+    input.courseTitle,
+    input.notes,
+    input.remarks,
+    input.description,
+  ];
+
+  for (const field of orderedFields) {
+    const match = detectExplicitNstpTrackFromText(field);
+    if (match !== null) {
+      return match;
+    }
+  }
+
+  if (input.parentSection) {
+    if (
+      input.parentSection.track === 'CWTS' ||
+      input.parentSection.track === 'LTS' ||
+      input.parentSection.track === 'ROTC'
+    ) {
+      return input.parentSection.track;
+    }
+    return classifyNstpSectionTrack({
+      section: input.parentSection.section,
+      activity: input.parentSection.activity,
+      subtitle: input.parentSection.subtitle,
+      notes: input.parentSection.notes,
+      parentSection: input.parentSection.parentClass,
+    });
+  }
+
+  return 'Unlabeled';
+}
+
+/**
+ * Resolves the NSTP track (`'CWTS' | 'LTS' | 'ROTC' | 'Unlabeled'`) for a normalized section,
+ * or returns `null` when `courseCode` is provided and is not an NSTP course.
+ */
+export function getSectionNstpTrack(
+  section: NormalizedSection,
+  courseCode?: string
+): NstpTrack | null {
+  if (courseCode !== undefined && !isNstpCourse(courseCode)) {
+    return null;
+  }
+  if (
+    section.track === 'CWTS' ||
+    section.track === 'LTS' ||
+    section.track === 'ROTC' ||
+    section.track === 'Unlabeled'
+  ) {
+    return section.track;
+  }
+  return classifyNstpSectionTrack({
+    section: section.section,
+    activity: section.activity,
+    subtitle: section.subtitle,
+    notes: section.notes,
+    parentSection: section.parentClass,
+  });
 }
 
 /**
@@ -244,12 +393,19 @@ export function parseRawCourse(
   }
 
   const resolvedTermId = parseOptionalTermId(options?.termId);
+  const subtitle = firstNonEmptyString(
+    raw.subtitle,
+    raw.course_title,
+    raw.title,
+    raw.description
+  );
 
   return {
     instanceId: options?.instanceId ?? crypto.randomUUID(),
     id: String(raw.course_id),
     code: raw.course_code.trim(),
     ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
+    ...(subtitle !== null ? { subtitle } : {}),
     units,
     canEnrollMultiple: Boolean(raw.is_multiple_enrollment),
     isPreEnlisted: Boolean(options?.isPreEnlisted),
@@ -266,7 +422,7 @@ export function parseRawCourse(
 export function parseRawClass(
   raw: unknown,
   visitedIds: Set<string> = new Set<string>(),
-  options?: { termId?: number | null }
+  options?: { termId?: number | null; courseCode?: string; courseSubtitle?: string | null }
 ): NormalizedSection {
   if (!isRecord(raw)) {
     throw new AmisError('MALFORMED_RESPONSE', 'Raw class payload must be an object.');
@@ -314,13 +470,31 @@ export function parseRawClass(
   const resolvedTermId =
     parseOptionalTermId(options?.termId) ?? parseOptionalTermId(raw.term_id);
 
+  const nestedRawCourse = isRecord(raw.course) ? raw.course : null;
+  const resolvedCourseCode =
+    options?.courseCode ??
+    (nestedRawCourse && typeof nestedRawCourse.course_code === 'string'
+      ? nestedRawCourse.course_code.trim()
+      : undefined);
+
+  const resolvedCourseSubtitle =
+    options?.courseSubtitle ??
+    (nestedRawCourse
+      ? firstNonEmptyString(
+          nestedRawCourse.subtitle,
+          nestedRawCourse.course_title,
+          nestedRawCourse.title,
+          nestedRawCourse.description
+        )
+      : null);
+
   const parentClass =
     raw.parent !== null && raw.parent !== undefined
-      ? parseRawClass(
-          raw.parent,
-          nextVisited,
-          resolvedTermId !== undefined ? { termId: resolvedTermId } : undefined
-        )
+      ? parseRawClass(raw.parent, nextVisited, {
+          ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
+          ...(resolvedCourseCode !== undefined ? { courseCode: resolvedCourseCode } : {}),
+          ...(resolvedCourseSubtitle !== null ? { courseSubtitle: resolvedCourseSubtitle } : {}),
+        })
       : null;
 
   const parentClassId = parentClass
@@ -329,11 +503,46 @@ export function parseRawClass(
       ? String(raw.parent_class_id)
       : null;
 
+  const sectionCode = raw.section.trim();
+  const subtitle = firstNonEmptyString(
+    raw.section_title,
+    raw.subtitle,
+    raw.course_subtitle,
+    raw.title,
+    raw.course_title,
+    resolvedCourseSubtitle
+  );
+  const notes = firstNonEmptyString(raw.notes, raw.remarks, raw.description);
+
+  const trackInput: NstpTrackClassificationInput = {
+    section: sectionCode,
+    activity,
+    sectionTitle: firstNonEmptyString(raw.section_title),
+    subtitle: firstNonEmptyString(raw.subtitle),
+    courseSubtitle: firstNonEmptyString(raw.course_subtitle, resolvedCourseSubtitle),
+    title: firstNonEmptyString(raw.title),
+    courseTitle: firstNonEmptyString(raw.course_title),
+    notes: firstNonEmptyString(raw.notes),
+    remarks: firstNonEmptyString(raw.remarks),
+    description: firstNonEmptyString(raw.description),
+    parentSection: parentClass,
+  };
+
+  let track: NstpTrack | undefined;
+  if (resolvedCourseCode !== undefined && isNstpCourse(resolvedCourseCode)) {
+    track = classifyNstpSectionTrack(trackInput);
+  } else if (resolvedCourseCode === undefined) {
+    const explicit = classifyNstpSectionTrack(trackInput);
+    if (explicit === 'CWTS' || explicit === 'LTS' || explicit === 'ROTC') {
+      track = explicit;
+    }
+  }
+
   return {
     id,
     courseId: String(raw.course_id),
     ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
-    section: raw.section.trim(),
+    section: sectionCode,
     activity,
     faculties: parseFaculties(raw),
     location,
@@ -343,6 +552,9 @@ export function parseRawClass(
     isPrerogOpen: Boolean(raw.is_prerog_open),
     parentClassId,
     parentClass,
+    ...(subtitle !== null ? { subtitle } : {}),
+    ...(notes !== null ? { notes } : {}),
+    ...(track !== undefined ? { track } : {}),
   };
 }
 
@@ -356,6 +568,66 @@ export function compareSectionsCanonical(a: NormalizedSection, b: NormalizedSect
     return activityCmp;
   }
   return a.section.localeCompare(b.section, undefined, { numeric: true });
+}
+
+/**
+ * Deterministic NSTP section comparator:
+ * orders tracks CWTS -> LTS -> ROTC -> Unlabeled, then alphabetically/naturally by section code within each track.
+ */
+export function compareNstpSections(a: NormalizedSection, b: NormalizedSection): number {
+  const trackA = getSectionNstpTrack(a) ?? 'Unlabeled';
+  const trackB = getSectionNstpTrack(b) ?? 'Unlabeled';
+  const rankDiff = NSTP_TRACK_RANK[trackA] - NSTP_TRACK_RANK[trackB];
+  if (rankDiff !== 0) {
+    return rankDiff;
+  }
+  const sectionCmp = a.section.localeCompare(b.section, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+  if (sectionCmp !== 0) {
+    return sectionCmp;
+  }
+  const exactCmp = a.section.localeCompare(b.section);
+  if (exactCmp !== 0) {
+    return exactCmp;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * Returns section options sorted deterministically by NSTP track (`CWTS` -> `LTS` -> `ROTC` -> `Unlabeled`)
+ * and section code for NSTP courses, or a shallow copy preserving existing order otherwise.
+ */
+export function sortCourseSectionsForDisplay(
+  options: readonly CourseSectionOption[],
+  courseCode: string
+): CourseSectionOption[] {
+  if (!isNstpCourse(courseCode)) {
+    return [...options];
+  }
+  return [...options].sort((a, b) => compareNstpSections(a.section, b.section));
+}
+
+/**
+ * Computes per-track section counts (`All`, `CWTS`, `LTS`, `ROTC`, `Unlabeled`) for an NSTP course.
+ */
+export function computeNstpTrackCounts(
+  options: readonly CourseSectionOption[],
+  courseCode: string
+): Record<NstpTrackFilter, number> {
+  const counts: Record<NstpTrackFilter, number> = {
+    All: options.length,
+    CWTS: 0,
+    LTS: 0,
+    ROTC: 0,
+    Unlabeled: 0,
+  };
+  for (const opt of options) {
+    const track = getSectionNstpTrack(opt.section, courseCode) ?? 'Unlabeled';
+    counts[track] += 1;
+  }
+  return counts;
 }
 
 /**
@@ -463,16 +735,17 @@ export function buildCourseEntryFromRaw(
   const isPreEnlisted = Boolean(options?.isPreEnlisted);
   const course = parseRawCourse(rawCourse, options);
   const resolvedTermId = parseOptionalTermId(options?.termId) ?? course.termId;
+  const isNstp = isNstpCourse(course.code);
 
   const normalizedSections = rawClasses
     .map((rawClass) =>
-      parseRawClass(
-        rawClass,
-        new Set<string>(),
-        resolvedTermId !== undefined ? { termId: resolvedTermId } : undefined
-      )
+      parseRawClass(rawClass, new Set<string>(), {
+        ...(resolvedTermId !== undefined ? { termId: resolvedTermId } : {}),
+        courseCode: course.code,
+        ...(course.subtitle !== undefined ? { courseSubtitle: course.subtitle } : {}),
+      })
     )
-    .sort(compareSectionsCanonical);
+    .sort(isNstp ? compareNstpSections : compareSectionsCanonical);
 
   const sectionOptions: CourseSectionOption[] = normalizedSections.map((section) => ({
     section,

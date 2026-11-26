@@ -302,17 +302,35 @@ export function applyRelaxationToPlan(
         !dropCourseIds.has(course.id) &&
         !dropCourseCodes.has(normalizeCourseCodeKey(course.code))
     )
-    .map((course) => ({
-      ...course,
-      sections: course.sections.map((opt) => ({
-        ...opt,
-        flags: {
-          ...opt.flags,
-          isHidden: unhideIds.has(opt.section.id) ? false : opt.flags.isHidden,
-          isLocked: unlockIds.has(opt.section.id) ? false : opt.flags.isLocked,
-        },
-      })),
-    }));
+    .map((course) => {
+      let unhidOtherTrack = false;
+      const nextSections = course.sections.map((opt) => {
+        const shouldUnhide = unhideIds.has(opt.section.id);
+        if (
+          shouldUnhide &&
+          opt.flags.isHidden &&
+          course.nstpTrackFilter &&
+          course.nstpTrackFilter !== 'All' &&
+          opt.section.track !== course.nstpTrackFilter
+        ) {
+          unhidOtherTrack = true;
+        }
+        return {
+          ...opt,
+          flags: {
+            ...opt.flags,
+            isHidden: shouldUnhide ? false : opt.flags.isHidden,
+            isLocked: unlockIds.has(opt.section.id) ? false : opt.flags.isLocked,
+          },
+        };
+      });
+
+      return {
+        ...course,
+        ...(unhidOtherTrack ? { nstpTrackFilter: 'All' as const } : {}),
+        sections: nextSections,
+      };
+    });
 
   return {
     ...plan,

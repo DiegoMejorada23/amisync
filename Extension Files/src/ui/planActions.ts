@@ -1,9 +1,11 @@
+import { getSectionNstpTrack, isNstpCourse } from '../amis/parser.ts';
 import { applyRelaxationToPlan } from '../solver/explainer.ts';
 import {
   WEEKDAYS,
   type AcademicPlanState,
   type BlockedTimeCell,
   type CourseEntry,
+  type NstpTrackFilter,
   type StudentPreferences,
   type Weekday,
 } from '../types/domain.ts';
@@ -186,6 +188,92 @@ export function toggleCourseAccordion(
 }
 
 /**
+ * Selects an NSTP component track filter (`'All'`, `'CWTS'`, `'LTS'`, `'ROTC'`, or `'Unlabeled'`) for a course:
+ * - Selecting a specific track filters the visible list and auto-hides sections from other NSTP tracks
+ *   (`isHidden: true`, clearing `isLocked`) so the CP-SAT solver only considers that track.
+ * - Selecting `'All'` unhides non-pre-enlisted sections across all tracks.
+ */
+export function applyNstpTrackFilter(
+  plan: AcademicPlanState,
+  courseInstanceId: string,
+  trackFilter: NstpTrackFilter
+): AcademicPlanState {
+  const courseIdx = plan.intendedCourses.findIndex((c) => c.instanceId === courseInstanceId);
+  if (courseIdx === -1) {
+    return plan;
+  }
+
+  const course = plan.intendedCourses[courseIdx];
+  if (!isNstpCourse(course.code)) {
+    return plan;
+  }
+
+  if (
+    trackFilter !== 'All' &&
+    !course.sections.some((opt) => getSectionNstpTrack(opt.section, course.code) === trackFilter)
+  ) {
+    return plan;
+  }
+
+  let sectionsChanged = false;
+  const nextSections = course.sections.map((opt) => {
+    if (opt.isPreEnlisted) {
+      return opt;
+    }
+
+    if (trackFilter === 'All') {
+      if (!opt.flags.isHidden) {
+        return opt;
+      }
+      sectionsChanged = true;
+      return {
+        ...opt,
+        flags: {
+          ...opt.flags,
+          isHidden: false,
+        },
+      };
+    }
+
+    const secTrack = getSectionNstpTrack(opt.section, course.code);
+    const matchesTrack = secTrack === trackFilter;
+    const targetHidden = !matchesTrack;
+    const targetLocked = matchesTrack ? opt.flags.isLocked : false;
+
+    if (opt.flags.isHidden === targetHidden && opt.flags.isLocked === targetLocked) {
+      return opt;
+    }
+
+    sectionsChanged = true;
+    return {
+      ...opt,
+      flags: {
+        ...opt.flags,
+        isHidden: targetHidden,
+        isLocked: targetLocked,
+      },
+    };
+  });
+
+  const prevFilter = course.nstpTrackFilter ?? 'All';
+  if (!sectionsChanged && prevFilter === trackFilter) {
+    return plan;
+  }
+
+  const nextCourses = [...plan.intendedCourses];
+  nextCourses[courseIdx] = {
+    ...course,
+    nstpTrackFilter: trackFilter,
+    sections: sectionsChanged ? nextSections : course.sections,
+  };
+
+  return {
+    ...plan,
+    intendedCourses: nextCourses,
+  };
+}
+
+/**
  * Normalizes an AMIS course code by trimming, collapsing internal whitespace,
  * and uppercasing (e.g., `"  cmsc   191 "` -> `"CMSC 191"`).
  */
@@ -277,15 +365,34 @@ function addOrUpdateIntendedCourseInternal(
   const unhideAndExpand = Boolean(options?.unhideAndExpandExisting);
   let unhiddenSectionCount = 0;
 
+  const preservedTrackFilter =
+    !unhideAndExpand && existing.nstpTrackFilter !== undefined
+      ? existing.nstpTrackFilter
+      : undefined;
+
   const mergedCourse: CourseEntry = {
     ...incomingCourse,
     code: existing.code.trim() ? existing.code : incomingCourse.code,
     instanceId: existing.instanceId,
     isPreEnlisted: false,
     isExpanded: unhideAndExpand ? true : existing.isExpanded,
+    ...(preservedTrackFilter !== undefined ? { nstpTrackFilter: preservedTrackFilter } : {}),
     sections: incomingCourse.sections.map((opt) => {
       const prevFlags = prevFlagsBySectionId.get(opt.section.id);
       if (!prevFlags) {
+        if (
+          !unhideAndExpand &&
+          preservedTrackFilter &&
+          preservedTrackFilter !== 'All' &&
+          !opt.isPreEnlisted &&
+          isNstpCourse(incomingCourse.code) &&
+          getSectionNstpTrack(opt.section, incomingCourse.code) !== preservedTrackFilter
+        ) {
+          return {
+            ...opt,
+            flags: { ...opt.flags, isHidden: true, isLocked: false },
+          };
+        }
         return unhideAndExpand && opt.flags.isHidden
           ? { ...opt, flags: { ...opt.flags, isHidden: false } }
           : opt;
