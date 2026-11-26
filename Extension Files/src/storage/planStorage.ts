@@ -6,9 +6,12 @@ import {
 } from '../amis/terms.ts';
 import type { AcademicPlanState, AcademicTermOption } from '../types/domain.ts';
 import { createDefaultAcademicPlanState, PLAN_SCHEMA_VERSION } from '../types/domain.ts';
+import type { GeneratedScheduleAlternative } from '../types/solver.ts';
 
 export const PLAN_STORAGE_KEY = 'amisync_academic_plan';
 export const TERM_CATALOG_STORAGE_KEY = 'amisync_term_catalog';
+export const COMPARE_HANDOFF_STORAGE_KEY = 'amisync_compare_handoff';
+export const COMPARE_HANDOFF_TTL_MS = 60 * 1000; // 60 seconds
 export const MANUAL_REFRESH_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 export const AUTO_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
@@ -260,4 +263,96 @@ export async function saveTermCatalog(
   }));
   const sanitized = mergeTermOptions(normalized, DEFAULT_FALLBACK_TERMS);
   await enqueueStorageWrite(area, () => area.set({ [TERM_CATALOG_STORAGE_KEY]: sanitized }));
+}
+
+export interface CompareHandoffPayload {
+  alternatives: GeneratedScheduleAlternative[];
+  selectedPlanIndex: number;
+  createdAtMs: number;
+}
+
+function isValidGeneratedAlternative(value: unknown): value is GeneratedScheduleAlternative {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.planLabel === 'string' &&
+    typeof obj.profileTag === 'string' &&
+    typeof obj.totalUnits === 'number' &&
+    (obj.status === 'OPTIMAL' || obj.status === 'FEASIBLE') &&
+    typeof obj.objectiveScoreZ === 'number' &&
+    Array.isArray(obj.selectedSectionIds) &&
+    obj.selectedSectionIds.every((id) => typeof id === 'string') &&
+    Array.isArray(obj.hammingDistanceFromPrev) &&
+    obj.hammingDistanceFromPrev.every((n) => typeof n === 'number')
+  );
+}
+
+/**
+ * Stores a short-lived one-shot handoff in `chrome.storage.local` so clicking
+ * "Open Full Visual Compare in Overlay" from the popup immediately opens the
+ * side-by-side visual comparison modal with the generated alternatives in the overlay.
+ */
+export async function saveCompareHandoff(
+  alternatives: readonly GeneratedScheduleAlternative[],
+  selectedPlanIndex: number,
+  storage?: StorageAreaLike,
+  nowMs: number = Date.now()
+): Promise<void> {
+  const area = resolveStorageArea(storage);
+  const payload: CompareHandoffPayload = {
+    alternatives: [...alternatives],
+    selectedPlanIndex: Math.max(0, Math.min(Math.max(0, alternatives.length - 1), Math.trunc(selectedPlanIndex))),
+    createdAtMs: nowMs,
+  };
+  await enqueueStorageWrite(area, () => area.set({ [COMPARE_HANDOFF_STORAGE_KEY]: payload }));
+}
+
+/**
+ * Reads and immediately clears any fresh compare handoff written by the popup.
+ */
+export async function consumeCompareHandoff(
+  storage?: StorageAreaLike,
+  nowMs: number = Date.now()
+): Promise<{ alternatives: GeneratedScheduleAlternative[]; selectedPlanIndex: number } | null> {
+  const area = resolveStorageArea(storage);
+  const result = await area.get(COMPARE_HANDOFF_STORAGE_KEY);
+  const raw = result[COMPARE_HANDOFF_STORAGE_KEY];
+  if (!raw) {
+    return null;
+  }
+
+  await enqueueStorageWrite(area, () => area.remove(COMPARE_HANDOFF_STORAGE_KEY)).catch(
+    () => undefined
+  );
+
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+
+  const obj = raw as Record<string, unknown>;
+  if (
+    !Array.isArray(obj.alternatives) ||
+    obj.alternatives.length < 2 ||
+    !obj.alternatives.every(isValidGeneratedAlternative) ||
+    typeof obj.selectedPlanIndex !== 'number' ||
+    typeof obj.createdAtMs !== 'number'
+  ) {
+    return null;
+  }
+
+  if (nowMs - obj.createdAtMs > COMPARE_HANDOFF_TTL_MS || obj.createdAtMs - nowMs > COMPARE_HANDOFF_TTL_MS) {
+    return null;
+  }
+
+  const clampedIndex = Math.max(
+    0,
+    Math.min(obj.alternatives.length - 1, Math.trunc(obj.selectedPlanIndex))
+  );
+
+  return {
+    alternatives: obj.alternatives,
+    selectedPlanIndex: clampedIndex,
+  };
 }

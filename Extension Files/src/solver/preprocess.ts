@@ -1,4 +1,12 @@
-import { hasAvailableCapacity, hasFixedSchedule } from '../amis/parser.ts';
+import {
+  DEFAULT_COMPONENT_TYPE,
+  hasAvailableCapacity,
+  hasFixedSchedule,
+  isStandardComponentType,
+  normalizeComponentType,
+  normalizeCourseCodeKey,
+  SUBCOMPONENT_TYPE,
+} from '../amis/parser.ts';
 import {
   WEEKDAYS,
   type AcademicPlanState,
@@ -13,7 +21,7 @@ import {
   type Weekday,
 } from '../types/domain.ts';
 
-export const DEFAULT_COMPONENT_TYPE: ComponentType = 'DEFAULT';
+export { DEFAULT_COMPONENT_TYPE, normalizeComponentType, normalizeCourseCodeKey };
 
 export interface SolverSectionNode {
   nodeIndex: number;
@@ -81,13 +89,6 @@ export interface PreprocessedProblem {
   anyStarredSelectable: boolean;
   totalUnits: number;
   unitLimits: UnitLimitsConfig | null;
-}
-
-export function normalizeComponentType(activity: ComponentType | null | undefined): ComponentType {
-  if (typeof activity === 'string' && activity.trim().length > 0) {
-    return activity.trim().toUpperCase();
-  }
-  return DEFAULT_COMPONENT_TYPE;
 }
 
 /**
@@ -242,8 +243,9 @@ function collectCourseNodesFromOption(
 }
 
 /**
- * Merges pre-enlisted and intended course entries when the same non-repeatable course
- * appears in both lists (partial pre-enlistment, e.g., pre-enlisted LEC + intended LAB).
+ * Merges pre-enlisted and intended course entries sharing the same normalized course code
+ * or course ID (including multi-topic courses such as CMSC 191, partial pre-enlistment,
+ * and duplicate course entries) so all sections of a course share one constraint group.
  * Enforces cross-term isolation by excluding courses or sections tagged with a different `termId`.
  */
 function mergeCourseEntries(
@@ -265,11 +267,11 @@ function mergeCourseEntries(
     courseCode: string;
     units: number;
     isPreEnlistedCourse: boolean;
-    canEnrollMultiple: boolean;
     rawRequiredComponents: Set<ComponentType>;
     accMap: Map<string, RawNodeAccumulator>;
   }> = [];
 
+  const byCourseCode = new Map<string, (typeof merged)[number]>();
   const byCourseId = new Map<string, (typeof merged)[number]>();
 
   const addCourse = (course: CourseEntry, fromPreEnlistedList: boolean) => {
@@ -282,7 +284,10 @@ function mergeCourseEntries(
     }
 
     const courseIsPre = fromPreEnlistedList || course.isPreEnlisted;
-    const existing = !course.canEnrollMultiple ? byCourseId.get(course.id) : undefined;
+    const normalizedCode = normalizeCourseCodeKey(course.code);
+    const existing =
+      (normalizedCode ? byCourseCode.get(normalizedCode) : undefined) ??
+      byCourseId.get(course.id);
 
     if (existing) {
       if (!courseIsPre) {
@@ -293,6 +298,12 @@ function mergeCourseEntries(
       }
       for (const option of course.sections) {
         collectCourseNodesFromOption(option, courseIsPre, existing.accMap, effectiveTermId);
+      }
+      if (normalizedCode && !byCourseCode.has(normalizedCode)) {
+        byCourseCode.set(normalizedCode, existing);
+      }
+      if (course.id && !byCourseId.has(course.id)) {
+        byCourseId.set(course.id, existing);
       }
       return;
     }
@@ -307,18 +318,20 @@ function mergeCourseEntries(
     }
 
     const record = {
-      courseKey: course.instanceId || `${course.id}::${merged.length}`,
+      courseKey: course.instanceId || normalizedCode || `${course.id}::${merged.length}`,
       courseId: course.id,
       courseCode: course.code,
       units: course.units,
       isPreEnlistedCourse: courseIsPre,
-      canEnrollMultiple: course.canEnrollMultiple,
       rawRequiredComponents,
       accMap,
     };
 
     merged.push(record);
-    if (!course.canEnrollMultiple) {
+    if (normalizedCode) {
+      byCourseCode.set(normalizedCode, record);
+    }
+    if (course.id) {
       byCourseId.set(course.id, record);
     }
   };
@@ -331,13 +344,58 @@ function mergeCourseEntries(
   }
 
   return merged.map((m) => {
-    // Derive required components from pre-pruning structure if not explicitly provided.
-    const required = new Set<ComponentType>(m.rawRequiredComponents);
-    if (required.size === 0) {
+    // 1. Prevent child sections with non-standard topic subtitles from colliding with their parent's component.
+    for (const acc of m.accMap.values()) {
+      if (acc.parentSectionId) {
+        const parentAcc = m.accMap.get(acc.parentSectionId);
+        if (parentAcc && acc.component === parentAcc.component && !isStandardComponentType(acc.component)) {
+          acc.component = SUBCOMPONENT_TYPE;
+        }
+      }
+    }
+
+    // 2. Unify standalone/root DEFAULT (topic-subtitle) sections with LEC when LEC is present
+    //    and no child section uses DEFAULT, ensuring all root sections of the course share one sum == 1 bucket.
+    const hasChildDefault = Array.from(m.accMap.values()).some(
+      (acc) => acc.parentSectionId !== null && acc.component === DEFAULT_COMPONENT_TYPE
+    );
+    const hasLecRootOrDeclared =
+      m.rawRequiredComponents.has('LEC') ||
+      Array.from(m.accMap.values()).some(
+        (acc) => acc.parentSectionId === null && acc.component === 'LEC'
+      );
+
+    if (hasLecRootOrDeclared && !hasChildDefault) {
+      for (const acc of m.accMap.values()) {
+        if (acc.parentSectionId === null && acc.component === DEFAULT_COMPONENT_TYPE) {
+          acc.component = 'LEC';
+        }
+      }
+      if (m.rawRequiredComponents.has(DEFAULT_COMPONENT_TYPE)) {
+        m.rawRequiredComponents.delete(DEFAULT_COMPONENT_TYPE);
+        m.rawRequiredComponents.add('LEC');
+      }
+    }
+
+    // 3. Build required components: include every component present in accMap (so no section
+    //    variable floats unconstrained) plus any declared standard required components
+    //    (so missing mandatory components like LAB are caught as EXHAUSTED_CAPACITY).
+    const required = new Set<ComponentType>();
+    if (m.accMap.size === 0) {
+      for (const comp of m.rawRequiredComponents) {
+        required.add(comp);
+      }
+    } else {
       for (const acc of m.accMap.values()) {
         required.add(acc.component);
       }
+      for (const comp of m.rawRequiredComponents) {
+        if (isStandardComponentType(comp)) {
+          required.add(comp);
+        }
+      }
     }
+
     return {
       courseKey: m.courseKey,
       courseId: m.courseId,

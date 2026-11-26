@@ -285,4 +285,64 @@ describe('Preprocessing: TBA filtering, capacity pruning, and canonical sorting'
     const components = deriveRequiredComponents([lab10]);
     assert.deepEqual(components, ['LEC', 'LAB']);
   });
+
+  it('collapses distinct Special Topics subtitles (CMSC 191) into a single required component while preserving display activity', () => {
+    const rawCourse: RawAmisCourse = {
+      course_id: 191,
+      course_code: 'CMSC 191',
+      units: '3.0',
+      is_multiple_enrollment: true,
+    };
+
+    const course = buildCourseEntryFromRaw(rawCourse, [
+      makeRawClass({
+        id: 19101,
+        course_id: 191,
+        section: 'WX',
+        activity: 'Introduction to natural language processing',
+        class_dates: [
+          {
+            mon: false,
+            tue: true,
+            wed: false,
+            thu: false,
+            fri: false,
+            sat: false,
+            start_time: '01:00 PM',
+            end_time: '04:00 PM',
+          },
+        ],
+      }),
+      makeRawClass({
+        id: 19102,
+        course_id: 191,
+        section: 'EF',
+        activity: 'Knowledge management systems',
+        class_dates: [
+          {
+            mon: true,
+            tue: false,
+            wed: false,
+            thu: false,
+            fri: false,
+            sat: false,
+            start_time: '01:00 PM',
+            end_time: '04:00 PM',
+          },
+        ],
+      }),
+    ]);
+
+    assert.deepEqual(course.requiredComponents, ['DEFAULT']);
+    assert.deepEqual(
+      course.sections.map((opt) => ({
+        section: opt.section.section,
+        activity: opt.section.activity,
+      })),
+      [
+        { section: 'WX', activity: 'Introduction to natural language processing' },
+        { section: 'EF', activity: 'Knowledge management systems' },
+      ]
+    );
+  });
 });

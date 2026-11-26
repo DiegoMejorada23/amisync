@@ -9,6 +9,7 @@ import type {
   RelaxationAction,
 } from '../types/solver.ts';
 import {
+  normalizeCourseCodeKey,
   sectionDatesOverlap,
   sectionDatesOverlapBlockedCell,
   type PreprocessedProblem,
@@ -275,6 +276,12 @@ export function applyRelaxationToPlan(
       .filter((c): c is IntendedCourseRef => c.kind === 'INTENDED_COURSE')
       .map((c) => c.courseId)
   );
+  const dropCourseCodes = new Set(
+    action.relaxedConstraints
+      .filter((c): c is IntendedCourseRef => c.kind === 'INTENDED_COURSE')
+      .map((c) => normalizeCourseCodeKey(c.courseCode))
+      .filter((code) => code.length > 0)
+  );
 
   const nextBlockedCells = plan.blockedCells.filter((cell) => {
     for (const blk of relaxedBlocks) {
@@ -290,7 +297,11 @@ export function applyRelaxationToPlan(
   });
 
   const nextIntendedCourses = plan.intendedCourses
-    .filter((course) => !dropCourseIds.has(course.id))
+    .filter(
+      (course) =>
+        !dropCourseIds.has(course.id) &&
+        !dropCourseCodes.has(normalizeCourseCodeKey(course.code))
+    )
     .map((course) => ({
       ...course,
       sections: course.sections.map((opt) => ({

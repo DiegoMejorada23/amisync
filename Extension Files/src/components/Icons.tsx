@@ -88,3 +88,13 @@ export function CloseIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function CompareIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" {...props}>
+      <rect x="1.75" y="2.5" width="3.5" height="11" rx="0.8" />
+      <rect x="6.25" y="2.5" width="3.5" height="11" rx="0.8" />
+      <rect x="10.75" y="2.5" width="3.5" height="11" rx="0.8" />
+    </svg>
+  );
+}

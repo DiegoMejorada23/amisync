@@ -177,7 +177,32 @@ html.amisync-popup #root {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  max-width: 340px;
+  min-width: 0;
+  flex: 0 1 320px;
+  max-width: 320px;
+}
+
+.plan-bar__compare-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(123, 17, 19, 0.35);
+  border-radius: 5px;
+  background-color: #fdf2f2;
+  color: var(--up-maroon);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.plan-bar__compare-btn:hover {
+  background-color: #fce7e7;
+  border-color: var(--up-maroon);
 }
 
 .plan-bar__select--empty {
@@ -1604,7 +1629,14 @@ html.amisync-overlay #root {
   height: 34px;
   padding: 0 28px 0 10px;
   font-size: 13.5px;
-  max-width: 420px;
+  flex: 0 1 380px;
+  max-width: 380px;
+}
+
+.app-shell--overlay .plan-bar__compare-btn {
+  height: 34px;
+  padding: 0 11px;
+  font-size: 12.5px;
 }
 
 .app-shell--overlay .plan-status-pill {
@@ -1950,7 +1982,9 @@ html.amisync-overlay #root {
 }
 
 .app-shell--popup .plan-bar__selector-group {
-  gap: 6px;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .app-shell--popup .plan-bar__label {
@@ -1959,14 +1993,23 @@ html.amisync-overlay #root {
 
 .app-shell--popup .plan-bar__select {
   height: 26px;
-  padding: 0 22px 0 8px;
-  font-size: 11.5px;
-  max-width: 280px;
+  padding: 0 20px 0 7px;
+  font-size: 11px;
+  flex: 0 1 185px;
+  max-width: 185px;
+  min-width: 100px;
+}
+
+.app-shell--popup .plan-bar__compare-btn {
+  height: 26px;
+  padding: 0 7px;
+  gap: 4px;
+  font-size: 10.5px;
 }
 
 .app-shell--popup .plan-status-pill {
-  padding: 1px 6px;
-  font-size: 10px;
+  padding: 1px 5px;
+  font-size: 9.5px;
 }
 
 .app-shell--popup .plan-bar__legend {
@@ -2302,4 +2345,658 @@ html.amisync-overlay #root {
 
 .app-shell--popup .esc-keycap {
   font-size: 10px;
+}
+
+/* ============================================================================
+   Side-by-Side Plan Comparison Modal (Overlay & 800x600 Popup Modes)
+   ============================================================================ */
+
+.compare-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(15, 23, 42, 0.56);
+  overflow: hidden;
+}
+
+.compare-modal-backdrop--overlay {
+  padding: 14px;
+}
+
+.compare-modal-backdrop--popup {
+  padding: 10px;
+}
+
+.compare-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  max-width: 1260px;
+  max-height: 780px;
+  background-color: var(--surface-white);
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.36);
+  overflow: hidden;
+  outline: none;
+}
+
+.compare-modal--popup {
+  max-width: 780px;
+  max-height: 580px;
+  border-radius: 6px;
+}
+
+.compare-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 44px;
+  padding: 0 14px;
+  background-color: var(--up-maroon);
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-modal__header {
+  height: 38px;
+  padding: 0 12px;
+}
+
+.compare-modal__title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.compare-modal__title {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.compare-modal--popup .compare-modal__title {
+  font-size: 13px;
+}
+
+.compare-modal__subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.84);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-modal--popup .compare-modal__subtitle {
+  font-size: 11px;
+}
+
+.compare-modal__close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background-color: var(--up-maroon-dark);
+  color: #ffffff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-modal__close {
+  width: 24px;
+  height: 24px;
+}
+
+.compare-modal__close:hover {
+  background-color: #420708;
+}
+
+.compare-modal__grid {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--canvas-bg);
+  overflow: hidden;
+}
+
+.compare-modal--popup .compare-modal__grid {
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.compare-modal__grid.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compare-modal__grid.grid-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* Individual Plan Comparison Card */
+.compare-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background-color: var(--surface-white);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.compare-card--recommended {
+  border-color: rgba(123, 17, 19, 0.45);
+  box-shadow: 0 3px 12px rgba(123, 17, 19, 0.08);
+}
+
+.compare-card--active {
+  box-shadow: inset 0 0 0 1px rgba(123, 17, 19, 0.65);
+}
+
+.compare-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  background-color: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-card__header {
+  padding: 7px 8px;
+  align-items: flex-start;
+}
+
+.compare-card__header-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.compare-card__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background-color: #e2e8f0;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.compare-card__badge--recommended {
+  background-color: var(--up-maroon);
+  color: #ffffff;
+}
+
+.compare-modal--popup .compare-card__badge {
+  padding: 2px 6px;
+  font-size: 10.5px;
+}
+
+.compare-card__status-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.compare-card__status-chip--optimal {
+  background-color: #ecfdf5;
+  color: var(--emerald-ok);
+  border: 1px solid #a7f3d0;
+}
+
+.compare-card__status-chip--feasible {
+  background-color: #fff7ed;
+  color: var(--burnt-orange);
+  border: 1px solid #fed7aa;
+}
+
+.compare-card__active-chip {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background-color: #fdf2f2;
+  color: var(--up-maroon);
+  border: 1px solid rgba(123, 17, 19, 0.3);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.compare-card__units {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-card__units {
+  font-size: 10.5px;
+}
+
+/* Mini Visual Timetable Grid (Overlay Mode) */
+.mini-timetable {
+  flex: 1 1 0;
+  min-height: 168px;
+  margin: 8px 8px 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: var(--surface-white);
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-timetable__grid {
+  display: grid;
+  grid-template-columns: 32px repeat(6, minmax(0, 1fr));
+  grid-template-rows: 19px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.mini-timetable__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--slate-dark);
+  color: #ffffff;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  border-right: 1px solid #334155;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.mini-timetable__header:nth-child(7) {
+  border-right: none;
+}
+
+.mini-timetable__time-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  border-right: 1px solid var(--border-subtle);
+  background-color: var(--surface-white);
+}
+
+.mini-timetable__time-cell {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.mini-timetable__time-cell:last-child {
+  border-bottom: none;
+}
+
+.mini-timetable__day-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.mini-timetable__day-col:last-child {
+  border-right: none;
+}
+
+.mini-timetable__slot {
+  flex: 1 1 0;
+  min-height: 0;
+  border-bottom: 1px solid #eef2f6;
+}
+
+.mini-timetable__slot:last-of-type {
+  border-bottom: none;
+}
+
+.mini-timetable__slot--blocked {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--slate-cell),
+    var(--slate-cell) 3px,
+    var(--slate-stripe) 3px,
+    var(--slate-stripe) 6px
+  );
+  opacity: 0.85;
+}
+
+.mini-timetable__blocks-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mini-timetable__block {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  border-radius: 2px;
+  padding: 1px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  text-align: center;
+  overflow: hidden;
+  pointer-events: auto;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+}
+
+.mini-timetable__block-label {
+  font-size: 7.5px;
+  font-weight: 700;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.mini-timetable__block-section {
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1.05;
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.mini-timetable__block-room {
+  font-size: 6.5px;
+  font-weight: 500;
+  line-height: 1.05;
+  opacity: 0.84;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Trade-off Metrics Strip */
+.compare-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 8px 6px;
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-card__metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 7px 8px 6px;
+}
+
+.compare-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background-color: var(--canvas-bg);
+  border: 1px solid var(--border-subtle);
+  min-width: 0;
+}
+
+.compare-metric__label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.compare-metric__value {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-modal--popup .compare-metric__value {
+  font-size: 10.5px;
+}
+
+/* Chosen Sections per Course List */
+.compare-card__courses {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 8px 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background-color: #ffffff;
+  min-height: 0;
+  overflow: hidden;
+  flex: 0 1 94px;
+}
+
+.compare-modal--popup .compare-card__courses {
+  flex: 1 1 0;
+  margin: 0 8px 7px;
+}
+
+.compare-card__courses-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.compare-course-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.compare-course-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.compare-modal--popup .compare-course-item {
+  gap: 6px;
+  font-size: 10.5px;
+}
+
+.compare-course-item__primary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.compare-course-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.15);
+}
+
+.compare-course-item__code {
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compare-course-item__section-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compare-modal--popup .compare-course-item__section-pill {
+  padding: 0 4px;
+  font-size: 9.5px;
+}
+
+.compare-course-item__schedule {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.compare-modal--popup .compare-course-item__schedule {
+  font-size: 9.5px;
+}
+
+.compare-course-flag {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.compare-course-flag--locked {
+  color: var(--emerald-ok);
+}
+
+.compare-course-flag--starred {
+  color: #d97706;
+}
+
+/* Card Select Action Footer */
+.compare-card__footer {
+  padding: 0 8px 8px;
+  flex-shrink: 0;
+}
+
+.compare-card__select-btn {
+  width: 100%;
+  height: 34px;
+  border: none;
+  border-radius: 5px;
+  background-color: var(--up-maroon);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.compare-modal--popup .compare-card__select-btn {
+  height: 30px;
+  font-size: 11.5px;
+}
+
+.compare-card__select-btn:hover {
+  background-color: var(--up-maroon-hover);
+}
+
+/* Popup-only Overlay Expansion Footer */
+.compare-modal__popup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  background-color: var(--surface-white);
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.compare-modal__popup-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.compare-modal__overlay-btn {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid rgba(123, 17, 19, 0.4);
+  border-radius: 5px;
+  background-color: #fdf2f2;
+  color: var(--up-maroon);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.compare-modal__overlay-btn:hover:not(:disabled) {
+  background-color: #fce7e7;
+  border-color: var(--up-maroon);
+}
+
+.compare-modal__overlay-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }

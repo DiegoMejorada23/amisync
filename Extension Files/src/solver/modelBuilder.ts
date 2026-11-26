@@ -165,15 +165,22 @@ export function buildCpSatModel(
     }
   }
 
-  // Eq. (16): Accumulating Iterative Exclusion Cuts (strictly excluding pre-enlisted sections)
+  // Eq. (16): Accumulating Iterative Exclusion / No-Good Cuts (strictly excluding pre-enlisted sections)
+  // For baseline diversity (minDiff = 1), forbids the exact chosen set: sum_{v in chosen} v <= len(chosen) - 1.
   for (const cut of exclusionCuts) {
-    const upperBound = cut.nodeIndices.length - cut.minDiff;
+    const uniqueIndices = Array.from(new Set(cut.nodeIndices));
+    if (uniqueIndices.length === 0) {
+      continue;
+    }
+    const upperBound = uniqueIndices.length - cut.minDiff;
     if (upperBound < 0) {
       triviallyInfeasible = true;
       model.addLinearConstraint(0, 1, 1);
-    } else if (cut.nodeIndices.length > 0) {
+    } else if (uniqueIndices.length === 1 && upperBound === 0) {
+      model.addEquality(xVars[uniqueIndices[0]], 0);
+    } else {
       model.addLinearConstraint(
-        LinearExpr.sum(cut.nodeIndices.map((idx) => xVars[idx])),
+        LinearExpr.sum(uniqueIndices.map((idx) => xVars[idx])),
         0,
         upperBound
       );

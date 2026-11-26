@@ -1,3 +1,4 @@
+import { normalizeCourseCodeKey } from '../amis/parser.ts';
 import {
   WEEKDAYS,
   type AcademicPlanState,
@@ -309,10 +310,11 @@ export function buildTimetableBlocks(
     const courseColorMap = new Map<string, number>();
 
     plan.intendedCourses.forEach((course: CourseEntry, idx: number) => {
-      if (!courseColorMap.has(course.id)) {
-        courseColorMap.set(course.id, idx % 6);
+      const courseGroupKey = normalizeCourseCodeKey(course.code) || course.id;
+      if (!courseColorMap.has(courseGroupKey)) {
+        courseColorMap.set(courseGroupKey, idx % 6);
       }
-      const colorIndex = courseColorMap.get(course.id) ?? 0;
+      const colorIndex = courseColorMap.get(courseGroupKey) ?? 0;
 
       for (const option of course.sections) {
         const chain: NormalizedSection[] = [];
@@ -331,19 +333,18 @@ export function buildTimetableBlocks(
 }
 
 /**
- * Computes total units across pre-enlisted and intended courses (deduplicating non-repeatable courses by id).
+ * Computes total units across pre-enlisted and intended courses (deduplicating by normalized course code or id).
  */
 export function computePlanUnits(plan: AcademicPlanState): number {
-  const seenNonRepeatable = new Set<string>();
+  const seenCourseGroups = new Set<string>();
   let total = 0;
 
   for (const course of [...plan.preEnlistedCourses, ...plan.intendedCourses]) {
-    if (!course.canEnrollMultiple) {
-      if (seenNonRepeatable.has(course.id)) {
-        continue;
-      }
-      seenNonRepeatable.add(course.id);
+    const groupKey = normalizeCourseCodeKey(course.code) || course.id;
+    if (seenCourseGroups.has(groupKey)) {
+      continue;
     }
+    seenCourseGroups.add(groupKey);
     total += course.units;
   }
 

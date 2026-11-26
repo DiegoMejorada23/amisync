@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { buildCourseEntryFromRaw } from '../src/amis/parser.ts';
 import {
   computeHammingDistance,
   computeScheduleValidityRate,
@@ -9,6 +10,7 @@ import {
   solveAcademicPlan,
   validateScheduleAlternative,
 } from '../src/solver/index.ts';
+import type { RawAmisClass, RawAmisCourse } from '../src/types/amis.ts';
 import {
   createDefaultAcademicPlanState,
   type AcademicPlanState,
@@ -920,6 +922,269 @@ describe('Iterative Exclusion & Structural Diversity (Eq. 16)', () => {
     // 100% Schedule Validity Rate across all 3 generated plans
     const svrReport = computeScheduleValidityRate(plan, res.alternatives);
     assert.equal(svrReport.scheduleValidityRate, 1);
+  });
+
+  it('enforces strict sum == 1 and generates Plan A & Plan B for multi-topic CMSC 191 (SEC WX & SEC EF)', async () => {
+    const rawCourse: RawAmisCourse = {
+      course_id: 191,
+      course_code: 'CMSC 191',
+      units: '3',
+      is_multiple_enrollment: true,
+    };
+    const rawSections: RawAmisClass[] = [
+      {
+        id: 19101,
+        course_id: 191,
+        section: 'WX',
+        activity: 'Introduction to natural language processing',
+        hide_faculty: true,
+        faculties: [],
+        facility_id: 'ICS MH',
+        class_dates: [
+          {
+            mon: false,
+            tue: true,
+            wed: false,
+            thu: false,
+            fri: false,
+            sat: false,
+            start_time: '01:00 PM',
+            end_time: '04:00 PM',
+          },
+        ],
+        active_class_size: 12,
+        max_class_size: 30,
+        is_prerog_open: false,
+        parent: null,
+      },
+      {
+        id: 19102,
+        course_id: 191,
+        section: 'EF',
+        activity: 'Knowledge management systems',
+        hide_faculty: true,
+        faculties: [],
+        facility_id: 'ICS LH3',
+        class_dates: [
+          {
+            mon: true,
+            tue: false,
+            wed: false,
+            thu: false,
+            fri: false,
+            sat: false,
+            start_time: '01:00 PM',
+            end_time: '04:00 PM',
+          },
+        ],
+        active_class_size: 8,
+        max_class_size: 30,
+        is_prerog_open: false,
+        parent: null,
+      },
+    ];
+
+    const fromRaw = buildCourseEntryFromRaw(rawCourse, rawSections);
+
+    // Case 2: legacy stored CourseEntry whose requiredComponents still hold the raw topic subtitles
+    const legacyStored: CourseEntry = {
+      ...fromRaw,
+      requiredComponents: [
+        'Introduction to natural language processing',
+        'Knowledge management systems',
+      ],
+    };
+
+    // Case 3: sections split across two CourseEntry records sharing the same normalized courseCode
+    const splitEntries: CourseEntry[] = [
+      {
+        ...fromRaw,
+        instanceId: 'cmsc191-part-1',
+        id: '191-A',
+        code: 'CMSC 191',
+        canEnrollMultiple: true,
+        requiredComponents: ['Introduction to natural language processing'],
+        sections: [fromRaw.sections[0]],
+      },
+      {
+        ...fromRaw,
+        instanceId: 'cmsc191-part-2',
+        id: '191-B',
+        code: '  cmsc   191 ',
+        canEnrollMultiple: true,
+        requiredComponents: ['Knowledge management systems'],
+        sections: [fromRaw.sections[1]],
+      },
+    ];
+
+    const scenarios: Array<{ name: string; intendedCourses: CourseEntry[] }> = [
+      { name: 'parsed raw AMIS CMSC 191', intendedCourses: [fromRaw] },
+      { name: 'legacy persisted topic requiredComponents', intendedCourses: [legacyStored] },
+      { name: 'duplicate normalized courseCode entries', intendedCourses: splitEntries },
+    ];
+
+    for (const scenario of scenarios) {
+      const plan = createDefaultAcademicPlanState();
+      plan.intendedCourses = scenario.intendedCourses;
+
+      const res = await solveAcademicPlan(plan);
+      assert.equal(res.status, 'OPTIMAL', `Expected OPTIMAL for ${scenario.name}`);
+      assert.equal(
+        res.alternatives.length,
+        2,
+        `Expected 2 distinct plans (Plan A & Plan B) for ${scenario.name}, got ${res.alternatives.length}`
+      );
+      assert.deepEqual(
+        res.alternatives.map((a) => a.planLabel),
+        ['Plan A', 'Plan B']
+      );
+
+      // Mutual exclusion: each plan picks strictly 1 section (never both SEC WX and SEC EF)
+      for (const alt of res.alternatives) {
+        assert.equal(
+          alt.selectedSectionIds.length,
+          1,
+          `Expected exactly 1 section in ${alt.planLabel} for ${scenario.name}, got ${alt.selectedSectionIds.join(', ')}`
+        );
+        assert.equal(alt.totalUnits, 3);
+      }
+
+      // Plan A and Plan B must pick the two different sections (SEC WX vs SEC EF)
+      const pickedSet = new Set(res.alternatives.map((a) => a.selectedSectionIds[0]));
+      assert.deepEqual(Array.from(pickedSet).sort(), ['19101', '19102']);
+      assert.deepEqual(res.alternatives[1].hammingDistanceFromPrev, [2]);
+
+      // 100% SVR for generated plans, and SVR validator rejects selecting both simultaneously
+      const svr = computeScheduleValidityRate(plan, res.alternatives);
+      assert.equal(svr.scheduleValidityRate, 1);
+
+      const invalidBoth = validateScheduleAlternative(plan, {
+        ...res.alternatives[0],
+        selectedSectionIds: ['19101', '19102'],
+      });
+      assert.equal(invalidBoth.valid, false);
+      assert.ok(invalidBoth.violations.some((v) => v.code === 'DUPLICATE_COMPONENT'));
+    }
+  });
+
+  it('generates 3 distinct plans (Plan A, Plan B, Plan C) when CMSC 191 has 3+ non-conflicting multi-topic sections', async () => {
+    const cmsc191 = makeCourse({
+      id: '191',
+      code: 'CMSC 191',
+      requiredComponents: [],
+      sections: [
+        makeOption(
+          makeSection({
+            id: '191-WX',
+            courseId: '191',
+            section: 'WX',
+            activity: 'Introduction to natural language processing',
+            dates: [makeSlot(['Tuesday'], 780, 960)],
+          })
+        ),
+        makeOption(
+          makeSection({
+            id: '191-EF',
+            courseId: '191',
+            section: 'EF',
+            activity: 'Knowledge management systems',
+            dates: [makeSlot(['Monday'], 780, 960)],
+          })
+        ),
+        makeOption(
+          makeSection({
+            id: '191-AB',
+            courseId: '191',
+            section: 'AB',
+            activity: 'Computer vision and deep learning',
+            dates: [makeSlot(['Wednesday'], 780, 960)],
+          })
+        ),
+        makeOption(
+          makeSection({
+            id: '191-CD',
+            courseId: '191',
+            section: 'CD',
+            activity: 'Distributed systems engineering',
+            dates: [makeSlot(['Thursday'], 780, 960)],
+          })
+        ),
+      ],
+    });
+
+    const plan = createDefaultAcademicPlanState();
+    plan.intendedCourses = [cmsc191];
+
+    const res = await solveAcademicPlan(plan);
+    assert.equal(res.status, 'OPTIMAL');
+    assert.equal(res.alternatives.length, 3);
+    assert.deepEqual(
+      res.alternatives.map((a) => a.planLabel),
+      ['Plan A', 'Plan B', 'Plan C']
+    );
+
+    const picked = res.alternatives.map((a) => {
+      assert.equal(a.selectedSectionIds.length, 1);
+      return a.selectedSectionIds[0];
+    });
+    assert.equal(new Set(picked).size, 3);
+    assert.equal(computeScheduleValidityRate(plan, res.alternatives).scheduleValidityRate, 1);
+  });
+
+  it('preserves parent-child LAB linkage when parent sections carry differing Special Topics subtitles', async () => {
+    const parentWX = makeSection({
+      id: '191-WX-LEC',
+      courseId: '191',
+      section: 'WX',
+      activity: 'Introduction to natural language processing',
+      dates: [makeSlot(['Tuesday'], 600, 720)],
+    });
+    const labWX = makeSection({
+      id: '191-WX-1L',
+      courseId: '191',
+      section: 'WX-1L',
+      activity: 'LAB',
+      dates: [makeSlot(['Tuesday'], 780, 960)],
+      parentClass: parentWX,
+    });
+
+    const parentEF = makeSection({
+      id: '191-EF-LEC',
+      courseId: '191',
+      section: 'EF',
+      activity: 'Knowledge management systems',
+      dates: [makeSlot(['Monday'], 600, 720)],
+    });
+    const labEF = makeSection({
+      id: '191-EF-1L',
+      courseId: '191',
+      section: 'EF-1L',
+      activity: 'LAB',
+      dates: [makeSlot(['Monday'], 780, 960)],
+      parentClass: parentEF,
+    });
+
+    const cmsc191 = makeCourse({
+      id: '191',
+      code: 'CMSC 191',
+      sections: [makeOption(labWX), makeOption(labEF)],
+    });
+
+    const plan = createDefaultAcademicPlanState();
+    plan.intendedCourses = [cmsc191];
+
+    const res = await solveAcademicPlan(plan);
+    assert.equal(res.status, 'OPTIMAL');
+    assert.equal(res.alternatives.length, 2);
+
+    const sortedPairs = res.alternatives
+      .map((a) => [...a.selectedSectionIds].sort().join('+'))
+      .sort();
+    assert.deepEqual(sortedPairs, [
+      '191-EF-1L+191-EF-LEC',
+      '191-WX-1L+191-WX-LEC',
+    ]);
+    assert.equal(computeScheduleValidityRate(plan, res.alternatives).scheduleValidityRate, 1);
   });
 });
 

@@ -1,5 +1,7 @@
 import type { GeneratedScheduleAlternative } from '../types/solver.ts';
+import { MAX_COMPARED_PLANS } from '../ui/planComparison.ts';
 import { formatPlanOptionLabel } from '../ui/scheduleView.ts';
+import { CompareIcon } from './Icons.tsx';
 
 interface PlanBarProps {
   alternatives: readonly GeneratedScheduleAlternative[];
@@ -7,6 +9,7 @@ interface PlanBarProps {
   fallbackTotalUnits: number;
   isInfeasible: boolean;
   onSelectPlan: (index: number) => void;
+  onOpenCompare?: () => void;
 }
 
 export function PlanBar({
@@ -15,8 +18,10 @@ export function PlanBar({
   fallbackTotalUnits,
   isInfeasible,
   onSelectPlan,
+  onOpenCompare,
 }: PlanBarProps) {
   const activeAlt = alternatives[selectedPlanIndex] ?? null;
+  const comparableCount = Math.min(alternatives.length, MAX_COMPARED_PLANS);
 
   return (
     <div className="plan-bar">
@@ -48,6 +53,17 @@ export function PlanBar({
               >
                 {activeAlt.status === 'OPTIMAL' ? 'OPTIMAL' : 'FEASIBLE'}
               </span>
+            )}
+            {comparableCount >= 2 && (
+              <button
+                type="button"
+                className="plan-bar__compare-btn"
+                title={`Compare ${comparableCount} generated plans side-by-side`}
+                onClick={() => onOpenCompare?.()}
+              >
+                <CompareIcon width={12} height={12} />
+                <span>Compare ({comparableCount})</span>
+              </button>
             )}
           </>
         ) : (

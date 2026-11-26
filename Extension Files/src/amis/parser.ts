@@ -12,6 +12,57 @@ import { AmisError } from './errors.ts';
 
 const TIME_12H_REGEX = /^(\d{1,2}):(\d{2})\s*([APap][Mm])$/;
 
+export const DEFAULT_COMPONENT_TYPE: ComponentType = 'DEFAULT';
+export const SUBCOMPONENT_TYPE: ComponentType = 'SUBCOMPONENT';
+
+const STANDARD_COMPONENT_MAP: Readonly<Record<string, ComponentType>> = {
+  LEC: 'LEC',
+  LECTURE: 'LEC',
+  LAB: 'LAB',
+  LABORATORY: 'LAB',
+  RECIT: 'RECIT',
+  RECITATION: 'RECIT',
+  REC: 'RECIT',
+  DISC: 'DISC',
+  DISCUSSION: 'DISC',
+};
+
+/**
+ * Normalizes a course code for canonical grouping (trim, collapse whitespace, uppercase).
+ */
+export function normalizeCourseCodeKey(code: string): string {
+  return code.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+/**
+ * Maps standard UPLB AMIS structural component labels (`LEC`, `LAB`, `RECIT`, `DISC`)
+ * to canonical component keys while collapsing empty values and free-text Special Topics
+ * subtitles (e.g., `"Introduction to natural language processing"`) into `DEFAULT`.
+ */
+export function normalizeComponentType(activity: ComponentType | null | undefined): ComponentType {
+  if (typeof activity !== 'string') {
+    return DEFAULT_COMPONENT_TYPE;
+  }
+  const normalized = activity.trim().replace(/\s+/g, ' ').toUpperCase();
+  if (!normalized) {
+    return DEFAULT_COMPONENT_TYPE;
+  }
+  return STANDARD_COMPONENT_MAP[normalized] ?? DEFAULT_COMPONENT_TYPE;
+}
+
+/**
+ * Returns true if the given component type is a recognized standard UPLB structural component
+ * (as opposed to `DEFAULT` or `SUBCOMPONENT`).
+ */
+export function isStandardComponentType(component: ComponentType): boolean {
+  return (
+    component === 'LEC' ||
+    component === 'LAB' ||
+    component === 'RECIT' ||
+    component === 'DISC'
+  );
+}
+
 const DAY_FLAG_MAP: ReadonlyArray<readonly [keyof Pick<RawAmisClassDate, 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'>, Weekday]> = [
   ['mon', 'Monday'],
   ['tue', 'Tuesday'],
@@ -362,22 +413,37 @@ export function filterAndPruneSections(
 }
 
 function collectComponentsChain(section: NormalizedSection, set: Set<ComponentType>): void {
+  let parentComponent: ComponentType | null = null;
   if (section.parentClass) {
     collectComponentsChain(section.parentClass, set);
+    parentComponent = normalizeComponentType(section.parentClass.activity);
   }
-  if (section.activity) {
-    set.add(section.activity);
+  let comp = normalizeComponentType(section.activity);
+  if (parentComponent !== null && comp === parentComponent && !isStandardComponentType(comp)) {
+    comp = SUBCOMPONENT_TYPE;
   }
+  set.add(comp);
 }
 
 /**
- * Derives unique required component types (e.g., `["LEC", "LAB"]`) across candidate sections,
+ * Derives unique normalized structural component types (e.g., `["LEC", "LAB"]`, or `["DEFAULT"]`
+ * for Special Topics courses whose `activity` stores per-section topic subtitles),
  * ordering parent components before child components.
  */
 export function deriveRequiredComponents(sections: NormalizedSection[]): ComponentType[] {
   const seen = new Set<ComponentType>();
   for (const section of sections) {
     collectComponentsChain(section, seen);
+  }
+  if (seen.has('LEC') && seen.has(DEFAULT_COMPONENT_TYPE)) {
+    const hasChildDefault = sections.some(
+      (s) =>
+        (s.parentClass !== null || s.parentClassId !== null) &&
+        normalizeComponentType(s.activity) === DEFAULT_COMPONENT_TYPE
+    );
+    if (!hasChildDefault) {
+      seen.delete(DEFAULT_COMPONENT_TYPE);
+    }
   }
   return Array.from(seen);
 }

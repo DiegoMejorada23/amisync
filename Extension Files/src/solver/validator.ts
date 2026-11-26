@@ -1,4 +1,12 @@
-import { hasAvailableCapacity, hasFixedSchedule } from '../amis/parser.ts';
+import {
+  DEFAULT_COMPONENT_TYPE,
+  hasAvailableCapacity,
+  hasFixedSchedule,
+  isStandardComponentType,
+  normalizeComponentType,
+  normalizeCourseCodeKey,
+  SUBCOMPONENT_TYPE,
+} from '../amis/parser.ts';
 import type {
   AcademicPlanState,
   ComponentType,
@@ -8,7 +16,6 @@ import type {
 } from '../types/domain.ts';
 import type { GeneratedScheduleAlternative } from '../types/solver.ts';
 import {
-  normalizeComponentType,
   sectionDatesOverlap,
   sectionDatesOverlapBlockedCell,
 } from './preprocess.ts';
@@ -84,6 +91,7 @@ function indexPlanCatalog(plan: AcademicPlanState): {
     }
   >();
 
+  const courseKeyByCourseCode = new Map<string, string>();
   const courseKeyByCourseId = new Map<string, string>();
   let effectiveTermId: number | null =
     typeof plan.termId === 'number' && Number.isFinite(plan.termId) ? plan.termId : null;
@@ -124,11 +132,15 @@ function indexPlanCatalog(plan: AcademicPlanState): {
     ) {
       return;
     }
-    const existingKey = !course.canEnrollMultiple
-      ? courseKeyByCourseId.get(course.id)
-      : undefined;
-    const courseKey = existingKey ?? (course.instanceId || course.id);
-    if (!course.canEnrollMultiple) {
+    const normalizedCode = normalizeCourseCodeKey(course.code);
+    const existingKey =
+      (normalizedCode ? courseKeyByCourseCode.get(normalizedCode) : undefined) ??
+      courseKeyByCourseId.get(course.id);
+    const courseKey = existingKey ?? (course.instanceId || normalizedCode || course.id);
+    if (normalizedCode) {
+      courseKeyByCourseCode.set(normalizedCode, courseKey);
+    }
+    if (course.id) {
       courseKeyByCourseId.set(course.id, courseKey);
     }
 
@@ -151,7 +163,6 @@ function indexPlanCatalog(plan: AcademicPlanState): {
     }
 
     const coursePre = fromPreEnlisted || course.isPreEnlisted;
-    const seenComponents = new Set<ComponentType>();
 
     const registerSection = (
       sec: NormalizedSection,
@@ -167,7 +178,6 @@ function indexPlanCatalog(plan: AcademicPlanState): {
       }
 
       const comp = normalizeComponentType(sec.activity);
-      seenComponents.add(comp);
       const parentSectionId = sec.parentClass?.id ?? sec.parentClassId ?? null;
 
       const existing = bySectionId.get(sec.id);
@@ -205,12 +215,6 @@ function indexPlanCatalog(plan: AcademicPlanState): {
         isLocked: opt.flags.isLocked,
       });
     }
-
-    if (req.requiredComponents.size === 0) {
-      for (const comp of seenComponents) {
-        req.requiredComponents.add(comp);
-      }
-    }
   };
 
   for (const c of plan.preEnlistedCourses) {
@@ -218,6 +222,54 @@ function indexPlanCatalog(plan: AcademicPlanState): {
   }
   for (const c of plan.intendedCourses) {
     registerCourse(c, false);
+  }
+
+  // Reconcile components per course identically to preprocessAcademicPlan
+  for (const req of courseRequirements.values()) {
+    const courseEntries = Array.from(bySectionId.values()).filter(
+      (e) => e.courseKey === req.courseKey
+    );
+
+    for (const entry of courseEntries) {
+      if (entry.parentSectionId) {
+        const parent = bySectionId.get(entry.parentSectionId);
+        if (parent && entry.component === parent.component && !isStandardComponentType(entry.component)) {
+          entry.component = SUBCOMPONENT_TYPE;
+        }
+      }
+    }
+
+    const hasChildDefault = courseEntries.some(
+      (e) => e.parentSectionId !== null && e.component === DEFAULT_COMPONENT_TYPE
+    );
+    const hasLecRootOrDeclared =
+      req.requiredComponents.has('LEC') ||
+      courseEntries.some((e) => e.parentSectionId === null && e.component === 'LEC');
+
+    if (hasLecRootOrDeclared && !hasChildDefault) {
+      for (const entry of courseEntries) {
+        if (entry.parentSectionId === null && entry.component === DEFAULT_COMPONENT_TYPE) {
+          entry.component = 'LEC';
+        }
+      }
+      if (req.requiredComponents.has(DEFAULT_COMPONENT_TYPE)) {
+        req.requiredComponents.delete(DEFAULT_COMPONENT_TYPE);
+        req.requiredComponents.add('LEC');
+      }
+    }
+
+    if (courseEntries.length > 0) {
+      const reconciled = new Set<ComponentType>();
+      for (const entry of courseEntries) {
+        reconciled.add(entry.component);
+      }
+      for (const comp of req.requiredComponents) {
+        if (isStandardComponentType(comp)) {
+          reconciled.add(comp);
+        }
+      }
+      req.requiredComponents = reconciled;
+    }
   }
 
   // Record parent -> child component relationships per course

@@ -23,15 +23,18 @@ import {
 } from './components/CoursesTab.tsx';
 import { LeftFooterStrip } from './components/LeftFooterStrip.tsx';
 import { PlanBar } from './components/PlanBar.tsx';
+import { PlanComparisonModal } from './components/PlanComparisonModal.tsx';
 import { PreferencesTab } from './components/PreferencesTab.tsx';
 import { ScheduleConflictsPanel } from './components/ScheduleConflictsPanel.tsx';
 import { TimetableGrid } from './components/TimetableGrid.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import {
   canManualRefresh,
+  consumeCompareHandoff,
   loadAcademicPlan,
   loadTermCatalog,
   saveAcademicPlan,
+  saveCompareHandoff,
   saveTermCatalog,
   shouldAutoRefresh,
   subscribeAcademicPlanChanges,
@@ -45,7 +48,6 @@ import {
   type Weekday,
 } from './types/domain.ts';
 import type {
-  GeneratedScheduleAlternative,
   InfeasibilityDiagnosis,
   RelaxationAction,
 } from './types/solver.ts';
@@ -63,6 +65,15 @@ import {
   updatePreferences,
   type SyncedCourseRefreshOutcome,
 } from './ui/planActions.ts';
+import {
+  applyGeneratedAlternatives,
+  closeComparisonModal,
+  createInitialPlanComparisonState,
+  getEscapeKeyAction,
+  openComparisonModal,
+  selectPlanFromComparison,
+  type PlanComparisonState,
+} from './ui/planComparison.ts';
 import { computePlanUnits, type BlockedCellCoordinate } from './ui/scheduleView.ts';
 import { isSolverCancelledError, SolverWorkerClient } from './ui/workerClient.ts';
 
@@ -106,14 +117,18 @@ export default function App() {
     () => typeof navigator !== 'undefined' && navigator.onLine === false
   );
 
-  const [alternatives, setAlternatives] = useState<GeneratedScheduleAlternative[]>([]);
-  const [selectedPlanIndex, setSelectedPlanIndex] = useState(0);
+  const [comparison, setComparison] = useState<PlanComparisonState>(() =>
+    createInitialPlanComparisonState()
+  );
+  const { alternatives, selectedPlanIndex, isCompareModalOpen } = comparison;
   const [diagnosis, setDiagnosis] = useState<InfeasibilityDiagnosis | null>(null);
   const [isSolveBlocked, setIsSolveBlocked] = useState(false);
 
   const workerClientRef = useRef<SolverWorkerClient | null>(null);
   const planRef = useRef<AcademicPlanState>(plan);
   planRef.current = plan;
+  const comparisonRef = useRef<PlanComparisonState>(comparison);
+  comparisonRef.current = comparison;
   const autoSyncedTokenRef = useRef<string | null>(null);
   const solveRunIdRef = useRef(0);
   const activeSolveRef = useRef(false);
@@ -152,13 +167,24 @@ export default function App() {
       return;
     }
 
-    void Promise.all([loadAcademicPlan(), loadTermCatalog()])
-      .then(([loaded, cachedTerms]) => {
+    void Promise.all([
+      loadAcademicPlan(),
+      loadTermCatalog(),
+      isInIframe ? consumeCompareHandoff().catch(() => null) : Promise.resolve(null),
+    ])
+      .then(([loaded, cachedTerms, handoff]) => {
         if (!cancelled) {
           lastPersistedJsonRef.current = JSON.stringify(loaded);
           planRef.current = loaded;
           setPlan(loaded);
           setAvailableTerms(cachedTerms);
+          if (handoff && handoff.alternatives.length >= 2) {
+            setComparison({
+              alternatives: handoff.alternatives,
+              selectedPlanIndex: handoff.selectedPlanIndex,
+              isCompareModalOpen: true,
+            });
+          }
           setStorageHydrated(true);
         }
       })
@@ -177,8 +203,7 @@ export default function App() {
       lastPersistedJsonRef.current = serialized;
       planRef.current = externalPlan;
       setPlan(externalPlan);
-      setAlternatives([]);
-      setSelectedPlanIndex(0);
+      setComparison(createInitialPlanComparisonState());
       setDiagnosis(null);
       setIsSolveBlocked(false);
     });
@@ -203,8 +228,7 @@ export default function App() {
       setPlan(next);
 
       if (options?.preserveSchedule !== true) {
-        setAlternatives([]);
-        setSelectedPlanIndex(0);
+        setComparison(createInitialPlanComparisonState());
         if (activeSolveRef.current) {
           solveRunIdRef.current += 1;
           activeSolveRef.current = false;
@@ -569,13 +593,11 @@ export default function App() {
         return;
       }
       if (response.status === 'OPTIMAL' || response.status === 'FEASIBLE') {
-        setAlternatives(response.alternatives);
-        setSelectedPlanIndex(0);
+        setComparison(applyGeneratedAlternatives(response.alternatives));
         setDiagnosis(null);
         setIsSolveBlocked(false);
       } else {
-        setAlternatives([]);
-        setSelectedPlanIndex(0);
+        setComparison(createInitialPlanComparisonState());
         setDiagnosis(response.diagnosis);
         setIsSolveBlocked(true);
       }
@@ -764,6 +786,18 @@ export default function App() {
     [commitPlan, runSolve]
   );
 
+  const handleSelectPlan = useCallback((index: number) => {
+    setComparison((prev) => selectPlanFromComparison(prev, index));
+  }, []);
+
+  const handleOpenCompare = useCallback(() => {
+    setComparison((prev) => openComparisonModal(prev));
+  }, []);
+
+  const handleCloseCompare = useCallback(() => {
+    setComparison((prev) => closeComparisonModal(prev));
+  }, []);
+
   // 8. Overlay / Popup Dismissal & Expansion.
   const handleDismiss = useCallback(() => {
     if (window.parent !== window) {
@@ -787,26 +821,47 @@ export default function App() {
     }
   }, []);
 
+  const handleOpenOverlayCompare = useCallback(() => {
+    const currentComp = comparisonRef.current;
+    const persistHandoff =
+      hasChromeStorageApi() && currentComp.alternatives.length >= 2
+        ? saveCompareHandoff(currentComp.alternatives, currentComp.selectedPlanIndex).catch(
+            () => undefined
+          )
+        : Promise.resolve();
+
+    void persistHandoff.finally(() => {
+      handleExpandOverlay();
+    });
+  }, [handleExpandOverlay]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        if (getEscapeKeyAction(isCompareModalOpen) === 'close_compare_modal') {
+          event.preventDefault();
+          event.stopPropagation();
+          handleCloseCompare();
+          return;
+        }
         handleDismiss();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDismiss]);
+  }, [handleCloseCompare, handleDismiss, isCompareModalOpen]);
 
   const activeAlternative = alternatives[selectedPlanIndex] ?? null;
   const fallbackTotalUnits = useMemo(() => computePlanUnits(plan), [plan]);
   const hasAnyCourse =
     plan.preEnlistedCourses.length > 0 || plan.intendedCourses.length > 0;
   const hardClashCount = diagnosis ? diagnosis.hardClashCount : 0;
+  const canExpandOverlay = !isInIframe && authStatus !== 'not_on_amis' && hasChromeTabsApi();
 
   return (
     <div className={`app-shell ${isInIframe ? 'app-shell--overlay' : 'app-shell--popup'}`}>
       <TopBar
-        canExpandOverlay={!isInIframe && authStatus !== 'not_on_amis' && hasChromeTabsApi()}
+        canExpandOverlay={canExpandOverlay}
         onExpandOverlay={handleExpandOverlay}
         onDismiss={handleDismiss}
       />
@@ -819,7 +874,8 @@ export default function App() {
             selectedPlanIndex={selectedPlanIndex}
             fallbackTotalUnits={fallbackTotalUnits}
             isInfeasible={diagnosis !== null}
-            onSelectPlan={setSelectedPlanIndex}
+            onSelectPlan={handleSelectPlan}
+            onOpenCompare={handleOpenCompare}
           />
 
           <TimetableGrid
@@ -917,6 +973,18 @@ export default function App() {
           Press <kbd className="esc-keycap">Esc</kbd> to dismiss
         </span>
       </footer>
+
+      <PlanComparisonModal
+        isOpen={isCompareModalOpen}
+        isCompactPopup={!isInIframe}
+        canExpandOverlay={canExpandOverlay}
+        plan={plan}
+        alternatives={alternatives}
+        selectedPlanIndex={selectedPlanIndex}
+        onSelectPlan={handleSelectPlan}
+        onClose={handleCloseCompare}
+        onOpenOverlayCompare={handleOpenOverlayCompare}
+      />
     </div>
   );
 }

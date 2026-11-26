@@ -299,10 +299,11 @@ export async function solveAcademicPlan(
     const passesHamming = hammingDistances.every((d) => d >= minHamming);
 
     if (!passesHamming) {
-      // Discard candidate and initiate a fresh model re-run with updated exclusion cut (SPEC.md Section 5.5).
+      // Discard candidate and add an exact no-good cut forbidding this exact rejected combination
+      // without over-pruning valid distant alternatives (SPEC.md Section 5.5).
       exclusionCuts.push({
         nodeIndices: Array.from(selectedFlexibleSet),
-        minDiff: effectiveCutMinDiff,
+        minDiff: 1,
       });
       continue;
     }
