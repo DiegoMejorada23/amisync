@@ -46,6 +46,8 @@ export function PreferencesTab({
   onBack,
   onApplyConstraints,
 }: PreferencesTabProps) {
+  const includeFullSections = Boolean(preferences.includeFullSections);
+
   return (
     <div className="tab-panel">
       <div className="tab-panel__scroll preferences-scroll">
@@ -307,6 +309,51 @@ export function PreferencesTab({
                 }))
               }
             />
+          </div>
+        </section>
+
+        {/* 7. Temporary / Planning Toggle: Include Full / Closed Sections (0 open slots) */}
+        <section
+          className={`pref-card ${includeFullSections ? 'pref-card--active-toggle' : ''}`}
+        >
+          <div className="pref-card__top pref-card__top--center">
+            <div className="pref-card__info">
+              <label
+                htmlFor="pref-toggle-include-full"
+                className="pref-card__title pref-card__title--label"
+              >
+                Include Full / Closed Sections
+              </label>
+              <p className="pref-card__desc">
+                Include 0-open-slot sections (e.g., 40/40) during schedule generation for testing
+                and pre-enlistment planning.
+              </p>
+            </div>
+            <div className="switch-control">
+              <span
+                className={`switch-control__state ${
+                  includeFullSections ? 'switch-control__state--on' : ''
+                }`}
+              >
+                {includeFullSections ? 'ON' : 'OFF'}
+              </span>
+              <button
+                id="pref-toggle-include-full"
+                type="button"
+                role="switch"
+                aria-checked={includeFullSections}
+                aria-label="Include Full / Closed Sections"
+                className={`toggle-switch ${includeFullSections ? 'toggle-switch--checked' : ''}`}
+                onClick={() =>
+                  onChangePreferences((prev) => ({
+                    ...prev,
+                    includeFullSections: !Boolean(prev.includeFullSections),
+                  }))
+                }
+              >
+                <span className="toggle-switch__thumb" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </section>
       </div>

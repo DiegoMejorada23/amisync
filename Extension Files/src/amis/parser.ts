@@ -653,11 +653,11 @@ export function hasAvailableCapacity(section: NormalizedSection): boolean {
 /**
  * Applies AMISync preprocessing filters:
  * 1. Drops TBA/asynchronous sections lacking fixed meeting schedules.
- * 2. Prunes zero-slot sections (`activeClassSize >= maxClassSize`) unless `isPreEnlisted` is true.
+ * 2. Prunes zero-slot sections (`activeClassSize >= maxClassSize`) unless `isPreEnlisted` or `includeFullSections` is true.
  */
 export function filterAndPruneSections(
   sections: NormalizedSection[],
-  options: { isPreEnlisted: boolean }
+  options: { isPreEnlisted: boolean; includeFullSections?: boolean }
 ): {
   valid: NormalizedSection[];
   droppedTba: NormalizedSection[];
@@ -666,6 +666,7 @@ export function filterAndPruneSections(
   const valid: NormalizedSection[] = [];
   const droppedTba: NormalizedSection[] = [];
   const droppedFull: NormalizedSection[] = [];
+  const includeFull = Boolean(options.includeFullSections);
 
   for (const section of sections) {
     if (!hasFixedSchedule(section)) {
@@ -673,7 +674,7 @@ export function filterAndPruneSections(
       continue;
     }
 
-    if (!options.isPreEnlisted && !hasAvailableCapacity(section)) {
+    if (!options.isPreEnlisted && !includeFull && !hasAvailableCapacity(section)) {
       droppedFull.push(section);
       continue;
     }
@@ -766,19 +767,23 @@ export function buildCourseEntryFromRaw(
 
 /**
  * Evaluates a `CourseEntry` against TBA exclusion and capacity pruning rules,
- * exempting pre-enlisted courses/options from capacity pruning.
+ * exempting pre-enlisted courses/options (and all sections when `includeFullSections` is true).
  */
-export function checkExhaustedCapacity(course: CourseEntry): {
+export function checkExhaustedCapacity(
+  course: CourseEntry,
+  options?: { includeFullSections?: boolean }
+): {
   exhausted: boolean;
   validOptions: CourseSectionOption[];
 } {
+  const includeFull = Boolean(options?.includeFullSections);
   const validOptions: CourseSectionOption[] = [];
 
   for (const option of course.sections) {
     if (!hasFixedSchedule(option.section)) {
       continue;
     }
-    const exempt = course.isPreEnlisted || option.isPreEnlisted;
+    const exempt = includeFull || course.isPreEnlisted || option.isPreEnlisted;
     if (!exempt && !hasAvailableCapacity(option.section)) {
       continue;
     }

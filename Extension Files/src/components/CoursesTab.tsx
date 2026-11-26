@@ -53,6 +53,7 @@ interface CoursesTabProps {
   isSolving: boolean;
   isSolveBlocked: boolean;
   canGenerate: boolean;
+  includeFullSections?: boolean;
   onSelectTerm: (termId: number) => void;
   onSyncAmis: () => void;
   onSearchSuggestions: (query: string) => Promise<RawAmisCourse[]>;
@@ -84,6 +85,7 @@ export function CoursesTab({
   isSolving,
   isSolveBlocked,
   canGenerate,
+  includeFullSections = false,
   onSelectTerm,
   onSyncAmis,
   onSearchSuggestions,
@@ -374,7 +376,11 @@ export function CoursesTab({
                     {isExhausted && (
                       <span
                         className="course-card__exhausted-pill"
-                        title="0 open non-TBA sections available"
+                        title={
+                          includeFullSections
+                            ? '0 open non-TBA sections on AMIS (still included because Include Full / Closed Sections is ON)'
+                            : '0 open non-TBA sections available'
+                        }
                       >
                         0 open
                       </span>
@@ -622,7 +628,18 @@ export function CoursesTab({
             GENERATE FEASIBLE SCHEDULES
           </button>
         )}
-        <div className="cta-subcaption">Includes pre-enlisted courses</div>
+        <div className="cta-subcaption-row">
+          <div className="cta-subcaption">Includes pre-enlisted courses</div>
+          {includeFullSections && (
+            <span
+              className="cta-mode-badge"
+              role="status"
+              title="Full / closed sections (0 open slots) are included during schedule generation"
+            >
+              + Full Sections Included
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

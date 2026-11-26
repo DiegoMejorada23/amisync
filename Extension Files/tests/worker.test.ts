@@ -198,4 +198,54 @@ describe('Solver Web Worker Typed Request/Response Protocol', () => {
     assert.equal(feasibleRes.isFeasible, true);
     assert.equal(feasibleRes.diagnosis, null);
   });
+
+  it('respects includeFullSections in SOLVE_SCHEDULE and DIAGNOSE_CONFLICTS worker requests', async () => {
+    const fullCourse = makeSimpleCourse('30', 'CMSC 191', [
+      { id: '30-FULL', section: 'A', day: 'Monday', start: 600, end: 660 },
+    ]);
+    fullCourse.sections[0].section.activeClassSize = 40;
+    fullCourse.sections[0].section.maxClassSize = 40;
+
+    // 1. Default (includeFullSections: false): excluded and reported as EXHAUSTED_CAPACITY.
+    const defaultPlan = createDefaultAcademicPlanState();
+    assert.equal(defaultPlan.preferences.includeFullSections, false);
+    defaultPlan.intendedCourses = [fullCourse];
+
+    const defaultRes = await handleWorkerRequest({
+      type: 'SOLVE_SCHEDULE',
+      requestId: 'req-full-off',
+      plan: defaultPlan,
+    });
+    assert.ok(defaultRes && defaultRes.type === 'SOLVE_SCHEDULE_RESULT');
+    assert.equal(defaultRes.ok, true);
+    assert.ok(defaultRes.payload);
+    assert.equal(defaultRes.payload.status, 'INFEASIBLE');
+    assert.equal(defaultRes.payload.diagnosis?.origin, 'EXHAUSTED_CAPACITY');
+
+    const defaultDiag = await handleWorkerRequest({
+      type: 'DIAGNOSE_CONFLICTS',
+      requestId: 'req-full-diag-off',
+      plan: defaultPlan,
+    });
+    assert.ok(defaultDiag && defaultDiag.type === 'DIAGNOSE_CONFLICTS_RESULT');
+    assert.equal(defaultDiag.isFeasible, false);
+    assert.equal(defaultDiag.diagnosis?.origin, 'EXHAUSTED_CAPACITY');
+
+    // 2. Enabled (includeFullSections: true): 0/40 section is scheduled cleanly.
+    const enabledPlan = createDefaultAcademicPlanState();
+    enabledPlan.intendedCourses = [fullCourse];
+    enabledPlan.preferences.includeFullSections = true;
+
+    const enabledRes = await handleWorkerRequest({
+      type: 'SOLVE_SCHEDULE',
+      requestId: 'req-full-on',
+      plan: enabledPlan,
+    });
+    assert.ok(enabledRes && enabledRes.type === 'SOLVE_SCHEDULE_RESULT');
+    assert.equal(enabledRes.ok, true);
+    assert.ok(enabledRes.payload);
+    assert.equal(enabledRes.payload.status, 'OPTIMAL');
+    assert.equal(enabledRes.payload.diagnosis, null);
+    assert.deepEqual(enabledRes.payload.alternatives[0].selectedSectionIds, ['30-FULL']);
+  });
 });

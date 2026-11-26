@@ -1434,4 +1434,121 @@ describe('Infeasible Schedule Detection & Automatic QuickXplain Diagnosis', () =
     assert.deepEqual(res.diagnosis.affectedCourseCodes, ['CMSC 191']);
     assert.equal(res.timing.solverExecutionMs, 0);
   });
+
+  it('includes 0-slot (full/closed) sections when includeFullSections is true while still honoring isHidden and TBA exclusions', async () => {
+    const fullLec = makeSection({
+      id: '4002-LEC',
+      courseId: '4002',
+      section: 'AB',
+      activity: 'LEC',
+      dates: [makeSlot(['Tuesday', 'Thursday'], 540, 600)],
+      activeClassSize: 40,
+      maxClassSize: 40, // 0 open slots (0/40)
+    });
+    const fullLabVisible = makeSection({
+      id: '4002-LAB-1',
+      courseId: '4002',
+      section: 'AB-1L',
+      activity: 'LAB',
+      dates: [makeSlot(['Thursday'], 780, 960)],
+      activeClassSize: 40,
+      maxClassSize: 40,
+      parentClass: fullLec,
+    });
+    const fullLabHidden = makeSection({
+      id: '4002-LAB-2',
+      courseId: '4002',
+      section: 'AB-2L',
+      activity: 'LAB',
+      dates: [makeSlot(['Tuesday'], 780, 960)],
+      activeClassSize: 40,
+      maxClassSize: 40,
+      parentClass: fullLec,
+    });
+    const fullTba = makeSection({
+      id: '4002-TBA',
+      courseId: '4002',
+      section: 'AB-TBA',
+      activity: 'LAB',
+      dates: [],
+      activeClassSize: 40,
+      maxClassSize: 40,
+      parentClass: fullLec,
+    });
+
+    const course = makeCourse({
+      id: '4002',
+      code: 'CMSC 128',
+      requiredComponents: ['LEC', 'LAB'],
+      sections: [
+        makeOption(fullLabVisible),
+        makeOption(fullLabHidden, { flags: { isHidden: true } }),
+        makeOption(fullTba),
+      ],
+    });
+
+    // 1. Default (includeFullSections: false) excludes full sections and triggers EXHAUSTED_CAPACITY.
+    const defaultPlan = makePlan({ intendedCourses: [course] });
+    assert.equal(Boolean(defaultPlan.preferences.includeFullSections), false);
+    const defaultRes = await solveAcademicPlan(defaultPlan);
+    assert.equal(defaultRes.status, 'INFEASIBLE');
+    assert.ok(defaultRes.diagnosis);
+    assert.equal(defaultRes.diagnosis.origin, 'EXHAUSTED_CAPACITY');
+    assert.deepEqual(defaultRes.diagnosis.affectedCourseCodes, ['CMSC 128']);
+    assert.equal(
+      validateScheduleAlternative(defaultPlan, {
+        planLabel: 'Plan A',
+        profileTag: 'Balanced',
+        totalUnits: 3,
+        status: 'OPTIMAL',
+        objectiveScoreZ: 0,
+        selectedSectionIds: ['4002-LEC', '4002-LAB-1'],
+        hammingDistanceFromPrev: [],
+      }).violations.some((v) => v.code === 'CAPACITY_EXCEEDED'),
+      true
+    );
+
+    // 2. Enabled (includeFullSections: true) includes non-TBA full sections cleanly and excludes hidden/TBA.
+    const enabledPlan = makePlan({
+      intendedCourses: [course],
+      preferences: {
+        ...allOffPreferences(),
+        includeFullSections: true,
+      },
+    });
+    const preprocessed = preprocessAcademicPlan(enabledPlan);
+    assert.equal(preprocessed.exhaustedCourses.length, 0);
+    assert.equal(preprocessed.nodes.some((n) => n.sectionId === '4002-TBA'), false);
+
+    const enabledRes = await solveAcademicPlan(enabledPlan);
+    assert.equal(enabledRes.status, 'OPTIMAL');
+    assert.equal(enabledRes.diagnosis, null);
+    assert.equal(enabledRes.alternatives.length, 1);
+    assert.deepEqual(enabledRes.alternatives[0].selectedSectionIds.sort(), [
+      '4002-LAB-1',
+      '4002-LEC',
+    ]);
+    assert.equal(validateScheduleAlternative(enabledPlan, enabledRes.alternatives[0]).valid, true);
+
+    // 3. If the only non-TBA full section is explicitly hidden by the user, it remains excluded
+    //    and QuickXplain diagnoses the HIDDEN_SECTION conflict rather than EXHAUSTED_CAPACITY.
+    const allHiddenCourse = makeCourse({
+      id: '4002',
+      code: 'CMSC 128',
+      requiredComponents: ['LEC', 'LAB'],
+      sections: [makeOption(fullLabVisible, { flags: { isHidden: true } })],
+    });
+    const hiddenPlan = makePlan({
+      intendedCourses: [allHiddenCourse],
+      preferences: {
+        ...allOffPreferences(),
+        includeFullSections: true,
+      },
+    });
+    const hiddenRes = await solveAcademicPlan(hiddenPlan);
+    assert.equal(hiddenRes.status, 'INFEASIBLE');
+    assert.ok(hiddenRes.diagnosis);
+    assert.equal(hiddenRes.diagnosis.origin, 'PREFERENCE_CONFLICT');
+    assert.ok(hiddenRes.diagnosis.mus.some((m) => m.kind === 'HIDDEN_SECTION'));
+  });
 });

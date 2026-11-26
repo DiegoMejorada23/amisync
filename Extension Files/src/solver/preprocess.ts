@@ -419,18 +419,27 @@ function sectionHasDirectCapacity(section: NormalizedSection): boolean {
   return section.activeClassSize < section.maxClassSize;
 }
 
+export interface PreprocessOptions {
+  includeFullSections?: boolean;
+}
+
 /**
  * Performs SPEC.md Section 5.1 preprocessing prior to CP-SAT variable creation:
  * 1. Normalizes courses & atomic section components (supporting nested parentClass and flat parentClassId).
  * 2. Filters TBA/asynchronous sections lacking fixed meeting schedules.
- * 3. Prunes zero-slot sections (`activeClassSize >= maxClassSize`), exempting pre-enlisted sections.
+ * 3. Prunes zero-slot sections (`activeClassSize >= maxClassSize`), exempting pre-enlisted sections
+ *    (and all sections when `includeFullSections` is true).
  * 4. Drops orphaned child sections whose linked parent did not survive pruning, and detects exhausted capacity early.
  * 5. Builds day-indexed meeting occurrences, pairwise overlap lists, and blocked-time masks.
  */
 export function preprocessAcademicPlan(
   plan: AcademicPlanState,
-  unitLimitsOverride?: UnitLimitsConfig
+  unitLimitsOverride?: UnitLimitsConfig,
+  options?: PreprocessOptions
 ): PreprocessedProblem {
+  const includeFullSections = Boolean(
+    options?.includeFullSections ?? plan.preferences.includeFullSections
+  );
   const effectiveTermId = resolveEffectiveTermId(plan);
   const mergedCourses = mergeCourseEntries(
     plan.preEnlistedCourses,
@@ -448,7 +457,8 @@ export function preprocessAcademicPlan(
   for (const entry of mergedCourses) {
     totalUnits += entry.units;
 
-    // Step 1: Individual section TBA & capacity pruning (exempting pre-enlisted sections from capacity pruning).
+    // Step 1: Individual section TBA & capacity pruning (exempting pre-enlisted sections,
+    // or all sections when includeFullSections is enabled).
     const survivingAcc = new Map<string, RawNodeAccumulator>();
     for (const [secId, acc] of entry.accMap.entries()) {
       const fixedDirect = sectionHasDirectFixedDates(acc.section);
@@ -457,7 +467,7 @@ export function preprocessAcademicPlan(
         continue;
       }
 
-      if (!acc.isPreEnlisted) {
+      if (!includeFullSections && !acc.isPreEnlisted) {
         const capDirect = sectionHasDirectCapacity(acc.section);
         // If parent is nested and not pre-enlisted, parent capacity must also be open.
         const parentAcc = acc.parentSectionId ? entry.accMap.get(acc.parentSectionId) : undefined;

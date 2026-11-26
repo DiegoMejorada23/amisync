@@ -10,6 +10,7 @@ export {
   type ParentChildLinkageGroup,
   type PreprocessedCourse,
   type PreprocessedProblem,
+  type PreprocessOptions,
   type SolverSectionNode,
 } from './preprocess.ts';
 

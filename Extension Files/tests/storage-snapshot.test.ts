@@ -60,6 +60,7 @@ describe('Domain constants & Snapshot serialization', () => {
   it('round-trips AcademicPlanState through JSON snapshots', () => {
     const plan = createDefaultAcademicPlanState();
     plan.termId = 123;
+    plan.preferences.includeFullSections = true;
     plan.blockedCells.push({
       id: 'Tuesday:780-840',
       day: 'Tuesday',
@@ -78,6 +79,7 @@ describe('Domain constants & Snapshot serialization', () => {
     assert.equal(parsed.plan.termId, 123);
     assert.equal(parsed.plan.blockedCells.length, 1);
     assert.equal(parsed.plan.preferences.minimizeExcessiveGaps.gapThresholdMinutes, 120);
+    assert.equal(parsed.plan.preferences.includeFullSections, true);
   });
 
   it('rejects malformed snapshot JSON or invalid schema with MALFORMED_RESPONSE', () => {

@@ -655,6 +655,29 @@ export function updatePreferences(
         ...next.minimizeExcessiveGaps,
         gapThresholdMinutes: 120,
       },
+      includeFullSections: Boolean(next.includeFullSections),
+    },
+  };
+}
+
+/**
+ * Toggles or sets whether full/closed sections (0 open slots) are included
+ * as valid candidates during schedule generation.
+ */
+export function toggleIncludeFullSections(
+  plan: AcademicPlanState,
+  enabled?: boolean
+): AcademicPlanState {
+  const current = Boolean(plan.preferences.includeFullSections);
+  const nextValue = enabled !== undefined ? Boolean(enabled) : !current;
+  if (current === nextValue && plan.preferences.includeFullSections === nextValue) {
+    return plan;
+  }
+  return {
+    ...plan,
+    preferences: {
+      ...plan.preferences,
+      includeFullSections: nextValue,
     },
   };
 }

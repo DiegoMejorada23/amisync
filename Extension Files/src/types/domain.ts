@@ -148,6 +148,11 @@ export interface StudentPreferences {
   starredSectionPreference: {
     priority: PreferencePriority;   // Governs P_section weight W_section in Eq (13)
   };
+  /**
+   * Optional toggle to include full/closed sections (0 open slots) as valid
+   * solver candidates for testing and pre-enlistment planning (defaults to false).
+   */
+  includeFullSections?: boolean;
 }
 
 export interface DiversityConfig {
@@ -199,6 +204,7 @@ export const DEFAULT_STUDENT_PREFERENCES: StudentPreferences = {
   starredSectionPreference: {
     priority: 'Medium',
   },
+  includeFullSections: false,
 };
 
 export const DEFAULT_DIVERSITY_CONFIG: DiversityConfig = {
@@ -225,6 +231,7 @@ export function createDefaultAcademicPlanState(): AcademicPlanState {
       batchSubjectsToFewerDays: { ...DEFAULT_STUDENT_PREFERENCES.batchSubjectsToFewerDays },
       minimizeExcessiveGaps: { ...DEFAULT_STUDENT_PREFERENCES.minimizeExcessiveGaps },
       starredSectionPreference: { ...DEFAULT_STUDENT_PREFERENCES.starredSectionPreference },
+      includeFullSections: Boolean(DEFAULT_STUDENT_PREFERENCES.includeFullSections),
     },
     diversity: { ...DEFAULT_DIVERSITY_CONFIG },
     lastRefreshTime: null,

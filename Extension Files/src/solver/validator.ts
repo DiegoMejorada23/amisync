@@ -296,8 +296,12 @@ function indexPlanCatalog(plan: AcademicPlanState): {
 export function validateScheduleAlternative(
   plan: AcademicPlanState,
   alternative: GeneratedScheduleAlternative,
-  unitLimitsOverride?: UnitLimitsConfig
+  unitLimitsOverride?: UnitLimitsConfig,
+  options?: { includeFullSections?: boolean }
 ): ScheduleValidationResult {
+  const includeFullSections = Boolean(
+    options?.includeFullSections ?? plan.preferences.includeFullSections
+  );
   const violations: ScheduleValidationViolation[] = [];
   const { bySectionId, courseRequirements } = indexPlanCatalog(plan);
   const selectedIds = new Set(alternative.selectedSectionIds);
@@ -328,7 +332,7 @@ export function validateScheduleAlternative(
       });
     }
 
-    if (!entry.isPreEnlisted && !hasAvailableCapacity(entry.section)) {
+    if (!includeFullSections && !entry.isPreEnlisted && !hasAvailableCapacity(entry.section)) {
       violations.push({
         code: 'CAPACITY_EXCEEDED',
         message: `Full section ${entry.courseCode} ${entry.section.section} (${entry.section.activeClassSize}/${entry.section.maxClassSize}) was selected.`,
@@ -491,10 +495,11 @@ export function validateScheduleAlternative(
 export function computeScheduleValidityRate(
   plan: AcademicPlanState,
   alternatives: readonly GeneratedScheduleAlternative[],
-  unitLimitsOverride?: UnitLimitsConfig
+  unitLimitsOverride?: UnitLimitsConfig,
+  options?: { includeFullSections?: boolean }
 ): SvrEvaluationReport {
   const results = alternatives.map((alt) =>
-    validateScheduleAlternative(plan, alt, unitLimitsOverride)
+    validateScheduleAlternative(plan, alt, unitLimitsOverride, options)
   );
   const validSchedules = results.filter((r) => r.valid).length;
   const totalSchedules = alternatives.length;

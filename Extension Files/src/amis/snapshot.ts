@@ -283,6 +283,16 @@ function validatePreferences(rawPrefs: unknown): void {
     starredSectionPreference.priority,
     'preferences.starredSectionPreference.priority'
   );
+
+  if (
+    rawPrefs.includeFullSections !== undefined &&
+    typeof rawPrefs.includeFullSections !== 'boolean'
+  ) {
+    throw new AmisError(
+      'MALFORMED_RESPONSE',
+      'Plan payload preferences.includeFullSections must be a boolean.'
+    );
+  }
 }
 
 /**

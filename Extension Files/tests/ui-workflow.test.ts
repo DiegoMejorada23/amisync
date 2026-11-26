@@ -17,6 +17,7 @@ import {
   switchPlanTerm,
   toggleBlockedCell,
   toggleCourseAccordion,
+  toggleIncludeFullSections,
   toggleSectionFlag,
   updatePreferences,
 } from '../src/ui/planActions.ts';
@@ -724,5 +725,27 @@ describe('Milestone 5 UI View Models, Reducers & End-to-End HITL Workflow', () =
       formatSearchAddStatusMessage(preSearchResult),
       'CMSC 165 is already pre-enlisted in your schedule.'
     );
+  });
+
+  it('toggles includeFullSections via planActions with default false and preserves it through updatePreferences', () => {
+    let plan = createDefaultAcademicPlanState();
+    assert.equal(plan.preferences.includeFullSections, false);
+
+    plan = toggleIncludeFullSections(plan);
+    assert.equal(plan.preferences.includeFullSections, true);
+
+    // updatePreferences preserves includeFullSections
+    plan = updatePreferences(plan, (prev) => ({
+      ...prev,
+      minimizeFridayClasses: { priority: 'High' },
+    }));
+    assert.equal(plan.preferences.includeFullSections, true);
+    assert.equal(plan.preferences.minimizeFridayClasses.priority, 'High');
+
+    // Explicit set to same value is a no-op reference return
+    assert.equal(toggleIncludeFullSections(plan, true), plan);
+
+    plan = toggleIncludeFullSections(plan, false);
+    assert.equal(plan.preferences.includeFullSections, false);
   });
 });

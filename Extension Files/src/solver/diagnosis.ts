@@ -50,14 +50,17 @@ async function solveFallbackCandidate(
   action: RelaxationAction,
   budget: QuickXplainBudget,
   unitLimits: DiagnosisExecutionOptions['unitLimits'],
-  fallbackIndex: number
+  fallbackIndex: number,
+  includeFullSections?: boolean
 ): Promise<FallbackScheduleOption | null> {
   const remainingSec = (budget.deadlineMs - performance.now()) / 1000;
   if (remainingSec < 0.08) {
     return null;
   }
 
-  const relaxedProblem = preprocessAcademicPlan(relaxedPlan, unitLimits);
+  const relaxedProblem = preprocessAcademicPlan(relaxedPlan, unitLimits, {
+    includeFullSections,
+  });
   if (relaxedProblem.exhaustedCourses.length > 0) {
     return null;
   }
@@ -178,7 +181,8 @@ async function computeFallbackScheduleOptions(
         action,
         budget,
         options?.unitLimits,
-        fallbacks.length
+        fallbacks.length,
+        options?.includeFullSections
       );
       if (option) {
         fallbacks.push(option);
@@ -324,7 +328,9 @@ export async function diagnoseAcademicPlan(
   options?: DiagnosisExecutionOptions
 ): Promise<DiagnosisRunResult> {
   const { coldStartMs } = await ensureWasmInitialized();
-  const problem = preprocessAcademicPlan(plan, options?.unitLimits);
+  const problem = preprocessAcademicPlan(plan, options?.unitLimits, {
+    includeFullSections: options?.includeFullSections,
+  });
   const result = await diagnosePreprocessedProblem(plan, problem, options);
   return {
     ...result,

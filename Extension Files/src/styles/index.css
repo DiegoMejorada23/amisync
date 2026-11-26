@@ -1538,10 +1538,32 @@ html.amisync-popup #root {
   background-color: var(--surface-subtle);
 }
 
+.cta-subcaption-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .cta-subcaption {
   text-align: center;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.cta-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background-color: #fffbeb;
+  color: #92400e;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 /* Preferences & Weights Tab (Paper Files/1.2.png) */
@@ -1579,11 +1601,20 @@ html.amisync-popup #root {
   background-color: var(--surface-white);
 }
 
+.pref-card--active-toggle {
+  border-color: #f5d061;
+  background-color: #fffdf5;
+}
+
 .pref-card__top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.pref-card__top--center {
+  align-items: center;
 }
 
 .pref-card__info {
@@ -1596,6 +1627,69 @@ html.amisync-popup #root {
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-primary);
+}
+
+.pref-card__title--label {
+  display: block;
+  cursor: pointer;
+}
+
+.switch-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.switch-control__state {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 22px;
+  text-align: right;
+}
+
+.switch-control__state--on {
+  color: var(--up-maroon);
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background-color: #cbd5e1;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.toggle-switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(123, 17, 19, 0.2);
+}
+
+.toggle-switch--checked {
+  border-color: var(--up-maroon);
+  background-color: var(--up-maroon);
+}
+
+.toggle-switch__thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  transform: translateX(0);
+  transition: transform 0.16s ease;
+}
+
+.toggle-switch--checked .toggle-switch__thumb {
+  transform: translateX(16px);
 }
 
 .pref-card__desc {
@@ -2033,6 +2127,11 @@ html.amisync-overlay #root {
   font-size: 12.5px;
 }
 
+.app-shell--overlay .cta-mode-badge {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
 .app-shell--overlay .tab-panel__scroll {
   padding: 12px 14px;
   gap: 10px;
@@ -2458,6 +2557,10 @@ html.amisync-overlay #root {
 
 .app-shell--popup .cta-subcaption {
   font-size: 10.5px;
+}
+
+.app-shell--popup .cta-mode-badge {
+  font-size: 9.5px;
 }
 
 .app-shell--popup .tab-panel__scroll {

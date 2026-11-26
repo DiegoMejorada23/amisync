@@ -70,6 +70,9 @@ function clonePreferences(prefs: StudentPreferences): StudentPreferences {
     batchSubjectsToFewerDays: { ...prefs.batchSubjectsToFewerDays },
     minimizeExcessiveGaps: { ...prefs.minimizeExcessiveGaps },
     starredSectionPreference: { ...prefs.starredSectionPreference },
+    ...(prefs.includeFullSections !== undefined
+      ? { includeFullSections: prefs.includeFullSections }
+      : {}),
   };
 }
 
@@ -122,9 +125,12 @@ function buildSearchProfile(
 function resolveDiagnosisOptions(
   options?: SolverExecutionOptions
 ): DiagnosisExecutionOptions {
+  const includeFullSections =
+    options?.diagnosis?.includeFullSections ?? options?.includeFullSections;
   return {
     ...(options?.diagnosis ?? {}),
     unitLimits: options?.diagnosis?.unitLimits ?? options?.unitLimits,
+    ...(includeFullSections !== undefined ? { includeFullSections } : {}),
     ...(options?.diagnosis?.randomSeed === undefined && options?.randomSeed !== undefined
       ? { randomSeed: options.randomSeed }
       : {}),
@@ -149,7 +155,9 @@ export async function solveAcademicPlan(
   const { coldStartMs } = await ensureWasmInitialized();
 
   const preprocessStart = performance.now();
-  const problem = preprocessAcademicPlan(plan, options?.unitLimits);
+  const problem = preprocessAcademicPlan(plan, options?.unitLimits, {
+    includeFullSections: options?.includeFullSections,
+  });
   let modelConstructionMs = performance.now() - preprocessStart;
   let solverExecutionMs = 0;
   const diagOptions = resolveDiagnosisOptions(options);

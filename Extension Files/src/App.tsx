@@ -954,6 +954,7 @@ export default function App() {
                 isSolving={isSolving}
                 isSolveBlocked={isSolveBlocked}
                 canGenerate={hasAnyCourse}
+                includeFullSections={Boolean(plan.preferences.includeFullSections)}
                 onSelectTerm={handleSelectTerm}
                 onSyncAmis={() => void syncFromAmis({ force: false })}
                 onSearchSuggestions={handleSearchSuggestions}

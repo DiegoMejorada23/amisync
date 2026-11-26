@@ -27,6 +27,8 @@ export interface DiagnosisExecutionOptions {
   maxConsistencyChecks?: number;
   /** Optional unit bounds overriding or augmenting AcademicPlanState.unitLimits. */
   unitLimits?: UnitLimitsConfig;
+  /** Optional override to include full/closed sections (0 open slots) as valid candidates. */
+  includeFullSections?: boolean;
   /**
    * Optional priority overrides for foreground constraints, keyed by constraint key
    * (e.g., courseId, courseCode, blockId, or sectionId). Higher values = preserved first.
@@ -45,6 +47,8 @@ export interface SolverExecutionOptions {
   maxTimeInSeconds?: number;
   /** Optional unit bounds overriding or augmenting AcademicPlanState.unitLimits. */
   unitLimits?: UnitLimitsConfig;
+  /** Optional override to include full/closed sections (0 open slots) as valid candidates. */
+  includeFullSections?: boolean;
   /** Optional deterministic random seed for reproducible testing. */
   randomSeed?: number;
   /** Configuration for automatic Phase 2 QuickXplain diagnosis on INFEASIBLE solves. */
