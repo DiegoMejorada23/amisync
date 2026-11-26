@@ -53,6 +53,7 @@ import type {
   RelaxationAction,
 } from './types/solver.ts';
 import {
+  PREFERENCES_SAVED_STATUS_MESSAGE,
   addSearchedIntendedCourse,
   applyBlockedCellsRange,
   applyNstpTrackFilter,
@@ -60,6 +61,7 @@ import {
   formatSearchAddStatusMessage,
   reconcileSyncedPlan,
   removeIntendedCourse,
+  savePreferencesAndReturnToCourses,
   switchPlanTerm,
   toggleBlockedCell,
   toggleCourseAccordion,
@@ -135,6 +137,16 @@ export default function App() {
   const solveRunIdRef = useRef(0);
   const activeSolveRef = useRef(false);
   const lastPersistedJsonRef = useRef<string | null>(null);
+  const statusDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearStatusDismissTimer = useCallback(() => {
+    if (statusDismissTimerRef.current !== null) {
+      clearTimeout(statusDismissTimerRef.current);
+      statusDismissTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearStatusDismissTimer, [clearStatusDismissTimer]);
 
   const isInIframe = typeof window !== 'undefined' && window.parent !== window;
 
@@ -586,6 +598,10 @@ export default function App() {
 
     const runId = ++solveRunIdRef.current;
     activeSolveRef.current = true;
+    clearStatusDismissTimer();
+    setStatusMessage((prev) =>
+      prev === PREFERENCES_SAVED_STATUS_MESSAGE ? null : prev
+    );
     setIsSolving(true);
     setSearchError(null);
 
@@ -766,19 +782,31 @@ export default function App() {
     [commitPlan]
   );
 
-  const handleApplyConstraints = useCallback(() => {
-    const current = planRef.current;
-    if (hasChromeStorageApi()) {
-      lastPersistedJsonRef.current = JSON.stringify(current);
-      void saveAcademicPlan(current).catch(() => {});
-    }
-    if (current.preEnlistedCourses.length > 0 || current.intendedCourses.length > 0) {
-      void runSolve(current);
-    } else {
-      setActiveTab('courses');
-      setStatusMessage('Preferences saved. Add at least one course to generate schedules.');
-    }
-  }, [runSolve]);
+  const handleSavePreferences = useCallback(() => {
+    clearStatusDismissTimer();
+    savePreferencesAndReturnToCourses({
+      currentPlan: planRef.current,
+      commitNormalizedPlan: (normalized) => {
+        commitPlan(() => normalized);
+      },
+      persistPlan: (planToSave) => {
+        if (hasChromeStorageApi()) {
+          lastPersistedJsonRef.current = JSON.stringify(planToSave);
+          return saveAcademicPlan(planToSave).catch(() => {});
+        }
+      },
+      switchToCoursesTab: () => {
+        setActiveTab('courses');
+      },
+      showStatusMessage: (message) => {
+        setStatusMessage(message);
+        statusDismissTimerRef.current = setTimeout(() => {
+          statusDismissTimerRef.current = null;
+          setStatusMessage((prev) => (prev === message ? null : prev));
+        }, 3500);
+      },
+    });
+  }, [clearStatusDismissTimer, commitPlan]);
 
   const handleApplyRelaxation = useCallback(
     (action: RelaxationAction) => {
@@ -969,10 +997,9 @@ export default function App() {
             ) : (
               <PreferencesTab
                 preferences={plan.preferences}
-                isSolving={isSolving}
                 onChangePreferences={handleChangePreferences}
                 onBack={() => setActiveTab('courses')}
-                onApplyConstraints={handleApplyConstraints}
+                onSavePreferences={handleSavePreferences}
               />
             )}
           </div>

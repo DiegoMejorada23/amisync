@@ -682,6 +682,43 @@ export function toggleIncludeFullSections(
   };
 }
 
+export const PREFERENCES_SAVED_STATUS_MESSAGE = 'Preferences saved.';
+
+export interface SavePreferencesActionContext {
+  currentPlan: AcademicPlanState;
+  commitNormalizedPlan: (plan: AcademicPlanState) => void;
+  persistPlan?: (plan: AcademicPlanState) => void | Promise<void>;
+  switchToCoursesTab: () => void;
+  showStatusMessage: (message: string) => void;
+}
+
+/**
+ * Commits/persists all current preference weights, blocked slots, and toggles to plan state
+ * and `chrome.storage.local`, switches back to the Courses tab, and displays a brief
+ * confirmation message without invoking CP-SAT schedule generation.
+ */
+export function savePreferencesAndReturnToCourses(
+  context: SavePreferencesActionContext
+): AcademicPlanState {
+  const normalizedPlan = updatePreferences(context.currentPlan, (prev) => prev);
+  const didNormalizeChange =
+    JSON.stringify(normalizedPlan.preferences) !==
+    JSON.stringify(context.currentPlan.preferences);
+
+  const finalPlan = didNormalizeChange ? normalizedPlan : context.currentPlan;
+  if (didNormalizeChange) {
+    context.commitNormalizedPlan(finalPlan);
+  }
+
+  if (context.persistPlan) {
+    void context.persistPlan(finalPlan);
+  }
+
+  context.switchToCoursesTab();
+  context.showStatusMessage(PREFERENCES_SAVED_STATUS_MESSAGE);
+  return finalPlan;
+}
+
 /**
  * Applies a QuickXplain MUS relaxation action immutably to the active AcademicPlanState.
  */

@@ -3,10 +3,9 @@ import { formatSliderTime12h } from '../ui/scheduleView.ts';
 
 interface PreferencesTabProps {
   preferences: StudentPreferences;
-  isSolving: boolean;
   onChangePreferences: (updater: (prev: StudentPreferences) => StudentPreferences) => void;
   onBack: () => void;
-  onApplyConstraints: () => void;
+  onSavePreferences: () => void;
 }
 
 const PRIORITY_OPTIONS: readonly PreferencePriority[] = ['Off', 'Low', 'Medium', 'High'];
@@ -41,10 +40,9 @@ function WeightSelect({ id, value, onChange }: WeightSelectProps) {
 
 export function PreferencesTab({
   preferences,
-  isSolving,
   onChangePreferences,
   onBack,
-  onApplyConstraints,
+  onSavePreferences,
 }: PreferencesTabProps) {
   const includeFullSections = Boolean(preferences.includeFullSections);
 
@@ -366,10 +364,9 @@ export function PreferencesTab({
         <button
           type="button"
           className="btn-cta-primary"
-          disabled={isSolving}
-          onClick={onApplyConstraints}
+          onClick={onSavePreferences}
         >
-          {isSolving ? 'Applying...' : 'Apply Constraints'}
+          Save &amp; Apply Preferences
         </button>
       </div>
     </div>
